@@ -7,6 +7,47 @@ interface WorkspaceProps {
   language: Language;
 }
 
+const TRANSLATIONS = {
+  ko: {
+    title: '현무암 스타일 화분 (협업)',
+    subtitle: '제주 리메이커 작업실',
+    liveSync: '실시간 동기화 활성',
+    saveDraft: '초안 저장',
+    finishExport: '완료 및 내보내기',
+    viewport: '뷰포트',
+    perspective: '원근 투영',
+    orbit: '회전',
+    pan: '이동',
+    zoom: '확대/축소',
+    verifiedMaker: '인증된 메이커',
+    online: '온라인',
+    today: '오늘',
+    shareBlueprint: '도면 공유',
+    requestMod: '수정 요청',
+    placeholder: '마스터 킴에게 질문하기...',
+    view: '보기'
+  },
+  en: {
+    title: 'Basalt Style Pot (Collaborative)',
+    subtitle: 'Jeju Re-Maker Workspace',
+    liveSync: 'Live Sync Active',
+    saveDraft: 'Save Draft',
+    finishExport: 'Finish & Export',
+    viewport: 'VIEWPORT',
+    perspective: 'Perspective',
+    orbit: 'Orbit',
+    pan: 'Pan',
+    zoom: 'Zoom',
+    verifiedMaker: 'Verified Maker',
+    online: 'Online',
+    today: 'Today',
+    shareBlueprint: 'Share Blueprint',
+    requestMod: 'Request Mod',
+    placeholder: 'Ask Master Kim...',
+    view: 'View'
+  }
+};
+
 const INITIAL_MESSAGES: Message[] = [
   { id: '1', sender: 'expert', text: "Welcome to the collaborative space! I see you've imported the Basalt texture. It looks quite authentic.", timestamp: '10:23 AM', avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCQktH3DenoThdgeDVlG9xdYEla3FDisOpT8PR36uqEcWdIFpSl7kAMY_Pcn94_KeJ10wtsmlDELj2A9bGn2ExGWjDWap_4wV_35vL82cz30KB7Sk7Y4gcEi3gFknpu-VaipcKYlBDl9FqLgg090jGddRM8JImT5UnIJ52FW9I7ktxhfCdjcZCnDEibQrdIjO7ReTalRE7ONj4avV1OvEkk_vw-yrxX-28NDfbVpBfPSF7-BPPgy5_-BBOsIvl4R5Iq4ozlyCyozH4' },
   { id: '2', sender: 'expert', text: "One thing to note: the geometry on the upper rim seems a bit sharp for this material. Basalt is usually more porous and eroded.", timestamp: '10:25 AM', avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCQktH3DenoThdgeDVlG9xdYEla3FDisOpT8PR36uqEcWdIFpSl7kAMY_Pcn94_KeJ10wtsmlDELj2A9bGn2ExGWjDWap_4wV_35vL82cz30KB7Sk7Y4gcEi3gFknpu-VaipcKYlBDl9FqLgg090jGddRM8JImT5UnIJ52FW9I7ktxhfCdjcZCnDEibQrdIjO7ReTalRE7ONj4avV1OvEkk_vw-yrxX-28NDfbVpBfPSF7-BPPgy5_-BBOsIvl4R5Iq4ozlyCyozH4' },
@@ -19,6 +60,7 @@ const INITIAL_MESSAGES: Message[] = [
 const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [inputText, setInputText] = useState('');
+  const t = TRANSLATIONS[language];
 
   const handleSendMessage = () => {
     if (!inputText.trim()) return;
@@ -41,23 +83,23 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
             <span className="material-symbols-outlined text-[20px]">hexagon</span>
           </div>
           <div>
-            <h2 className="text-white text-base font-bold leading-tight tracking-[-0.015em]">Basalt Style Pot (Collaborative)</h2>
-            <span className="text-xs text-gray-400 font-medium">Jeju Re-Maker Workspace</span>
+            <h2 className="text-white text-base font-bold leading-tight tracking-[-0.015em]">{t.title}</h2>
+            <span className="text-xs text-gray-400 font-medium">{t.subtitle}</span>
           </div>
         </div>
         <div className="flex flex-1 justify-end gap-6">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 rounded-full border border-white/10 backdrop-blur-sm">
               <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-              <span className="text-gray-300 text-xs font-medium">Live Sync Active</span>
+              <span className="text-gray-300 text-xs font-medium">{t.liveSync}</span>
             </div>
           </div>
           <div className="flex gap-3">
             <button className="flex cursor-pointer items-center justify-center overflow-hidden rounded-xl h-9 px-4 bg-white/10 hover:bg-white/20 text-white text-sm font-bold leading-normal tracking-[0.015em] transition-colors border border-white/5">
-              <span className="truncate">Save Draft</span>
+              <span className="truncate">{t.saveDraft}</span>
             </button>
             <button className="flex cursor-pointer items-center justify-center overflow-hidden rounded-xl h-9 px-5 bg-primary hover:bg-primary-dark text-background-viewer text-sm font-bold leading-normal tracking-[0.015em] shadow-[0_0_15px_rgba(23,207,99,0.3)] transition-all" onClick={onExit}>
-              <span className="truncate">Finish & Export</span>
+              <span className="truncate">{t.finishExport}</span>
             </button>
           </div>
         </div>
@@ -92,10 +134,10 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
           {/* Info Overlays */}
           <div className="absolute top-6 left-6 flex items-center gap-3">
             <div className="flex flex-col">
-              <span className="text-white/40 text-[10px] font-bold tracking-widest mb-1">VIEWPORT</span>
+              <span className="text-white/40 text-[10px] font-bold tracking-widest mb-1">{t.viewport}</span>
               <div className="flex items-center gap-2 text-white/80 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 hover:bg-black/60 transition-colors cursor-pointer">
                 <span className="material-symbols-outlined text-[16px]">view_in_ar</span>
-                <span className="text-sm font-medium">Perspective</span>
+                <span className="text-sm font-medium">{t.perspective}</span>
                 <span className="material-symbols-outlined text-[14px] ml-1 text-white/40">expand_more</span>
               </div>
             </div>
@@ -106,15 +148,15 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
             <div className="flex flex-col bg-[#1a1a1a]/90 backdrop-blur-md border border-white/10 rounded-2xl p-1.5 shadow-2xl">
               <button className="p-2.5 text-white/60 hover:text-primary hover:bg-white/5 rounded-xl transition-colors group relative">
                 <span className="material-symbols-outlined">3d_rotation</span>
-                <span className="absolute left-14 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">Orbit</span>
+                <span className="absolute left-14 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">{t.orbit}</span>
               </button>
               <button className="p-2.5 text-white/60 hover:text-primary hover:bg-white/5 rounded-xl transition-colors group relative">
                 <span className="material-symbols-outlined">pan_tool</span>
-                <span className="absolute left-14 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">Pan</span>
+                <span className="absolute left-14 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">{t.pan}</span>
               </button>
               <button className="p-2.5 text-primary bg-primary/10 rounded-xl transition-colors group relative">
                 <span className="material-symbols-outlined fill-current">zoom_in</span>
-                <span className="absolute left-14 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">Zoom</span>
+                <span className="absolute left-14 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">{t.zoom}</span>
               </button>
             </div>
             <div className="flex flex-col bg-[#1a1a1a]/90 backdrop-blur-md border border-white/10 rounded-2xl p-1.5 shadow-2xl">
@@ -156,7 +198,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
                   <h3 className="text-[#111814] text-sm font-bold">Master Kim</h3>
                   <span className="material-symbols-outlined text-primary text-[18px] fill-current">verified</span>
                 </div>
-                <p className="text-xs text-gray-500 font-medium">Verified Maker • Online</p>
+                <p className="text-xs text-gray-500 font-medium">{t.verifiedMaker} • {t.online}</p>
               </div>
             </div>
             <button className="text-gray-400 hover:text-[#111814] p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -167,7 +209,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-6 scrollbar-hide bg-[#fbfcfc]">
             <div className="flex justify-center my-2">
-              <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider bg-gray-100 px-3 py-1 rounded-full">Today, 10:23 AM</span>
+              <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider bg-gray-100 px-3 py-1 rounded-full">{t.today}, 10:23 AM</span>
             </div>
 
             {messages.map((msg) => {
@@ -181,7 +223,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
                       <p className="text-xs font-bold text-gray-800">{msg.text}</p>
                       <p className="text-[10px] text-gray-500 truncate font-mono">{msg.attachmentName}</p>
                     </div>
-                    <button className="ml-auto text-xs font-bold text-blue-600 hover:underline">View</button>
+                    <button className="ml-auto text-xs font-bold text-blue-600 hover:underline">{t.view}</button>
                   </div>
                 );
               }
@@ -215,11 +257,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
           <div className="px-5 py-3 bg-white flex gap-2 overflow-x-auto scrollbar-hide border-t border-[#f0f4f2]">
             <button className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-xs font-bold text-gray-600 transition-colors whitespace-nowrap">
               <span className="material-symbols-outlined text-[16px]">share</span>
-              Share Blueprint
+              {t.shareBlueprint}
             </button>
             <button className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-xs font-bold text-gray-600 transition-colors whitespace-nowrap">
               <span className="material-symbols-outlined text-[16px]">build</span>
-              Request Mod
+              {t.requestMod}
             </button>
           </div>
 
@@ -231,7 +273,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ onExit, language }) => {
               </button>
               <input 
                 className="w-full bg-transparent border-none focus:ring-0 text-sm py-3 text-gray-800 placeholder-gray-400" 
-                placeholder="Ask Master Kim..." 
+                placeholder={t.placeholder} 
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}

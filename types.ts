@@ -6,6 +6,13 @@ export interface Maker {
   rank?: number;
 }
 
+export interface Step {
+  id?: string;
+  title: string;
+  desc: string;
+  tip?: string;
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -17,6 +24,8 @@ export interface Project {
   likes?: number;
   isAiRemix?: boolean;
   isAiIdea?: boolean;
+  description?: string;
+  steps?: Step[];
 }
 
 export interface Message {
