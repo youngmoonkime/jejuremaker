@@ -1,44 +1,46 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Database, 
-  Upload, 
-  Plus, 
-  Trash2, 
+  UploadCloud, 
   Save, 
   Image as ImageIcon, 
-  Sparkles, 
-  Leaf, 
-  AlertCircle,
-  FileCode,
   Loader2,
   HardDrive,
   Settings,
   ArrowUpRight,
-  Eye,
-  FileText,
   Clock,
   Hammer,
   ChevronRight,
-  ListChecks,
   PlusCircle,
   X,
   Lightbulb,
   Recycle,
-  UploadCloud,
   Users,
-  LayoutGrid,
   Info,
-  Menu,
-  CheckCircle2
+  Box,
+  FileBox,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Project } from '../types';
 import { Language } from '../App';
 
-// --- Configuration ---
-const supabaseUrl = 'https://jbkfsvinitavzyflcuwg.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impia2ZzdmluaXRhdnp5ZmxjdXdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDAxOTUsImV4cCI6MjA4NDk3NjE5NX0.Nn3_-8Oky-yZ7VwFiiWbhxKdWfqOSz1ddj93fztfMak';
+// --- Cloudflare R2 Configuration ---
+// 주의: 실제 프로덕션 환경에서는 이 키들을 환경변수(.env)로 관리하거나 
+// 서버(Supabase Edge Function)에서 서명된 URL을 생성하여 사용하는 것이 보안상 안전합니다.
+const R2_ACCOUNT_ID = '170a312dca9dcb4790b82ea3f0bd3034'; 
+const R2_ACCESS_KEY_ID = '4e8c26d0b1a2d706fe96aa470704dc18';
+const R2_SECRET_ACCESS_KEY = '9e35d5139ae68e1f9fc305d8268494f8ab47755ca244b0369a0040e82c754f23';
+const R2_BUCKET_NAME = 'jeju-remaker-assets';
+// R2 버킷 설정에서 "Public Access"를 켜고, 해당 도메인을 입력하세요 (또는 Custom Domain)
+const R2_PUBLIC_DOMAIN = 'https://pub-b7d22eda2a2840a99f84fad5136127e0.r2.dev';
+
+// Max file size: 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; 
 
 interface AdminUploadProps {
+  supabase: SupabaseClient;
   onBack: () => void;
   onUploadComplete: (project: Project) => void;
   language: Language;
@@ -73,6 +75,9 @@ const TRANSLATIONS = {
       tools: '필요 도구',
       toolsPlaceholder: '예: 3D 프린터, 열풍기',
       difficulty: '난이도',
+      modelFile: '제작 파일 (3D 모델 / 2D 도면)',
+      modelDragDrop: '파일들을 여기로 드래그하거나 클릭하세요',
+      modelFormats: '.STL, .GLB, .DXF, .DWG, .PDF (파일당 최대 10MB)',
       diffLevels: {
         Easy: '쉬움',
         Intermediate: '보통',
@@ -95,8 +100,13 @@ const TRANSLATIONS = {
       selectImage: '이미지를 선택해주세요.'
     },
     alert: {
-      success: '✅ 성공: 이미지와 상세 제작 가이드가 모두 저장되었습니다.',
-      error: '❌ 오류: '
+      success: '✅ 성공: 프로젝트가 저장되었습니다.',
+      error: '❌ 오류: ',
+      bucketError: '⚠️ 버킷 오류: "item-images" 버킷을 찾을 수 없습니다.',
+      policyError: '⛔ 권한 오류: 업로드 권한이 없습니다. Supabase Storage > Policies 탭에서 INSERT 정책을 추가해주세요.',
+      sizeError: '⚠️ 파일 크기 초과: 10MB 이하의 파일만 업로드 가능합니다.',
+      r2ConfigError: '⚠️ R2 설정 필요: 코드 상단에 Cloudflare R2 키를 입력해주세요.',
+      r2UploadError: '⚠️ R2 업로드 오류: '
     },
     inventory: {
       noItems: '인벤토리에 항목이 없습니다.'
@@ -130,6 +140,9 @@ const TRANSLATIONS = {
       tools: 'Required Tools',
       toolsPlaceholder: 'e.g. 3D Printer, Heat Gun',
       difficulty: 'Difficulty Level',
+      modelFile: 'Fabrication File (3D/2D Drawings)',
+      modelDragDrop: 'Drag & drop fabrication files here',
+      modelFormats: '.STL, .GLB, .DXF, .DWG, .PDF (Max 10MB each)',
       diffLevels: {
         Easy: 'Easy',
         Intermediate: 'Intermediate',
@@ -152,8 +165,13 @@ const TRANSLATIONS = {
       selectImage: 'Please select an image.'
     },
     alert: {
-      success: '✅ Success: Image and detailed guide saved.',
-      error: '❌ Error: '
+      success: '✅ Success: Project saved.',
+      error: '❌ Error: ',
+      bucketError: '⚠️ Bucket Error: "item-images" bucket not found.',
+      policyError: '⛔ Permission Error: No upload access. Add an INSERT policy in Supabase Storage > Policies.',
+      sizeError: '⚠️ File too large: Max file size is 10MB.',
+      r2ConfigError: '⚠️ R2 Config Required: Please enter Cloudflare R2 keys at the top of the code.',
+      r2UploadError: '⚠️ R2 Upload Error: '
     },
     inventory: {
       noItems: 'No items found in inventory.'
@@ -161,14 +179,18 @@ const TRANSLATIONS = {
   }
 };
 
-const AdminUpload: React.FC<AdminUploadProps> = ({ onBack, onUploadComplete, language }) => {
+const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadComplete, language }) => {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'inventory'
   const [inventory, setInventory] = useState([]);
   
-  const [imageFile, setImageFile] = useState(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   
+  // R2 File State - Changed to array for multiple files
+  const [modelFiles, setModelFiles] = useState<File[]>([]);
+  const [isR2Configured, setIsR2Configured] = useState(false);
+
   const t = TRANSLATIONS[language];
 
   const [formData, setFormData] = useState({
@@ -180,24 +202,30 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ onBack, onUploadComplete, lan
     time: '',
     isAI: true,
     tools: '',
-    // 제작 가이드 스텝 데이터
     steps: [
       { title: '', desc: '', tip: '' }
     ]
   });
 
-  // --- Inventory Data Fetching ---
+  // Check R2 Configuration on mount
+  useEffect(() => {
+      // Cast to string to prevent TS narrowing to "never" due to const check
+      if ((R2_ACCOUNT_ID as string) !== 'YOUR_R2_ACCOUNT_ID' && !(R2_ACCOUNT_ID as string).includes('YOUR_')) {
+          setIsR2Configured(true);
+      }
+  }, []);
+
+  // --- Inventory Data Fetching & Bucket Check ---
   const fetchInventory = async () => {
-    if (!supabaseKey) return;
     try {
-      const response = await fetch(`${supabaseUrl}/rest/v1/items?select=*&order=created_at.desc`, {
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const { data, error } = await supabase
+        .from('items')
+        .select('*')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      
+      if (data) {
         setInventory(data);
       }
     } catch (error) {
@@ -206,6 +234,27 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ onBack, onUploadComplete, lan
   };
 
   useEffect(() => {
+    // Attempt to initialize storage bucket if it doesn't exist
+    const ensureBucket = async () => {
+        try {
+            const { data: buckets } = await supabase.storage.listBuckets();
+            // If we can list buckets and 'item-images' is missing, try to create it
+            if (buckets && !buckets.find(b => b.name === 'item-images')) {
+                const { error } = await supabase.storage.createBucket('item-images', { 
+                    public: true,
+                    fileSizeLimit: 5242880, // 5MB
+                    allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+                });
+                if (error) console.warn("Auto-bucket creation failed (likely permissions):", error.message);
+                else console.log("Created 'item-images' bucket successfully.");
+            }
+        } catch (e) {
+            // Silently fail if listing/creating is restricted (common for anon keys)
+            console.debug("Storage initialization skipped (permissions)");
+        }
+    };
+    ensureBucket();
+
     if (activeTab === 'inventory') {
       fetchInventory();
     }
@@ -219,94 +268,197 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ onBack, onUploadComplete, lan
     });
   };
 
-  const removeStep = (index) => {
+  const removeStep = (index: number) => {
     const newSteps = formData.steps.filter((_, i) => i !== index);
     setFormData({ ...formData, steps: newSteps });
   };
 
-  const updateStep = (index, field, value) => {
+  const updateStep = (index: number, field: string, value: string) => {
     const newSteps = [...formData.steps];
-    newSteps[index][field] = value;
+    (newSteps[index] as any)[field] = value;
     setFormData({ ...formData, steps: newSteps });
   };
 
   // --- Handlers ---
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (file) {
       setImageFile(file);
       setPreviewUrl(URL.createObjectURL(file));
     }
   };
 
-  const handleUpload = async (e) => {
+  const handleModelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      
+      // Validate file size (10MB)
+      const validFiles = newFiles.filter(file => {
+          if (file.size > MAX_FILE_SIZE) {
+              alert(`${t.alert.sizeError} (${file.name})`);
+              return false;
+          }
+          return true;
+      });
+
+      setModelFiles(prev => [...prev, ...validFiles]);
+    }
+  };
+
+  const removeModelFile = (index: number) => {
+    setModelFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadToR2 = async (file: File) => {
+    // If keys are not set, return a mock URL for testing
+    if (!isR2Configured) {
+       console.warn("R2 not configured. Returning mock URL for:", file.name);
+       // Simulate upload delay
+       await new Promise(resolve => setTimeout(resolve, 1000));
+       return `https://mock-r2-bucket.com/${file.name}`;
+    }
+
+    const S3 = new S3Client({
+      region: "auto",
+      endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: R2_ACCESS_KEY_ID,
+        secretAccessKey: R2_SECRET_ACCESS_KEY,
+      },
+    });
+
+    // Simple key generation - in production avoid special chars in filenames
+    const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const key = `models/${Date.now()}_${safeName}`;
+    
+    try {
+      // Convert File to Uint8Array to avoid browser/node stream ambiguity which causes 'fs.readFile' errors
+      const arrayBuffer = await file.arrayBuffer();
+      const fileBuffer = new Uint8Array(arrayBuffer);
+
+      await S3.send(new PutObjectCommand({
+          Bucket: R2_BUCKET_NAME,
+          Key: key,
+          Body: fileBuffer,
+          ContentType: file.type || 'application/octet-stream', 
+          ContentLength: file.size
+      }));
+      
+      // Return the public URL
+      // Ensure R2_PUBLIC_DOMAIN does not have a trailing slash
+      const domain = R2_PUBLIC_DOMAIN.endsWith('/') ? R2_PUBLIC_DOMAIN.slice(0, -1) : R2_PUBLIC_DOMAIN;
+      return `${domain}/${key}`;
+    } catch (err: any) {
+      console.error("R2 Upload Error", err);
+      // Alert explicit error to user
+      alert(`${t.alert.r2UploadError} ${err.message}`);
+      // Fallback to avoid breaking the app flow completely
+      return `https://upload-failed.com/${file.name}`; 
+    }
+  };
+
+  const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!imageFile) { alert(t.visuals.selectImage); return; }
 
     setLoading(true);
+    let finalImageUrl = '';
+
     try {
-      // 1. 이미지 업로드
-      const fileExt = imageFile.name.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-      const storageUrl = `${supabaseUrl}/storage/v1/object/item-images/${fileName}`;
+      // 1. Upload Image to Supabase Storage with Safe Filename
+      const fileExt = imageFile.name.split('.').pop() || 'jpg';
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
+      
+      try {
+        const { data: imageData, error: imageError } = await supabase.storage
+            .from('item-images')
+            .upload(fileName, imageFile);
 
-      const storageResponse = await fetch(storageUrl, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${supabaseKey}`, 'apikey': supabaseKey },
-        body: imageFile
-      });
+        if (imageError) throw imageError;
 
-      if (!storageResponse.ok) throw new Error("이미지 업로드 실패");
+        const { data: publicUrlData } = supabase.storage
+            .from('item-images')
+            .getPublicUrl(fileName);
+            
+        finalImageUrl = publicUrlData.publicUrl;
+      } catch (storageError: any) {
+        console.warn("Storage upload failed:", storageError.message);
+        
+        const errorMessage = storageError.message?.toLowerCase() || '';
+        
+        if (errorMessage.includes('row-level security') || errorMessage.includes('permission denied')) {
+            alert(`${t.alert.policyError}\n(Error: ${storageError.message})`);
+        } else {
+            alert(`${t.alert.bucketError}\n(Error: ${storageError.message})`);
+        }
+        
+        finalImageUrl = 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80';
+      }
 
-      const publicUrl = `${supabaseUrl}/storage/v1/object/public/item-images/${fileName}`;
+      // 2. Upload Model Files to Cloudflare R2 (Multiple)
+      const uploadedModels = [];
+      if (modelFiles.length > 0) {
+        if (!isR2Configured) {
+            alert(t.alert.r2ConfigError);
+        }
 
-      // 2. 데이터 저장 (가이드 스텝 포함)
-      const dbResponse = await fetch(`${supabaseUrl}/rest/v1/items`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify({
-          title: formData.title,
-          material: formData.material,
-          category: formData.category,
-          difficulty: formData.difficulty,
-          co2_reduction: parseFloat(formData.co2),
-          estimated_time: formData.time,
-          required_tools: formData.tools,
-          image_url: publicUrl,
-          is_ai_generated: formData.isAI,
-          metadata: {
-            fabrication_guide: formData.steps
+        for (const file of modelFiles) {
+            const url = await uploadToR2(file);
+            uploadedModels.push({
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                url: url
+            });
+        }
+      }
+
+      // 3. Save Data to Database using Supabase SDK
+      const { data: insertData, error: insertError } = await supabase
+        .from('items')
+        .insert([
+          {
+            title: formData.title,
+            material: formData.material,
+            category: formData.category,
+            difficulty: formData.difficulty,
+            co2_reduction: parseFloat(formData.co2),
+            estimated_time: formData.time,
+            required_tools: formData.tools,
+            image_url: finalImageUrl,
+            is_ai_generated: formData.isAI,
+            metadata: {
+              fabrication_guide: formData.steps,
+              model_files: uploadedModels, // Store array of files
+              download_url: uploadedModels.length > 0 ? uploadedModels[0].url : '' // Fallback backward compatibility
+            }
           }
-        })
-      });
+        ])
+        .select();
 
-      if (!dbResponse.ok) throw new Error("데이터 저장 실패");
+      if (insertError) throw insertError;
 
       alert(t.alert.success);
       
-      // Navigate back and update main list
       const newProject: Project = {
         id: Date.now().toString(),
         title: formData.title,
         maker: 'Master Kim',
-        image: publicUrl,
+        image: finalImageUrl,
         category: formData.category,
         time: formData.time || '2h',
         difficulty: formData.difficulty as 'Easy' | 'Medium' | 'Hard',
         isAiRemix: formData.isAI,
         description: `Project: ${formData.title}. Material: ${formData.material}`,
-        steps: formData.steps
+        steps: formData.steps,
+        downloadUrl: uploadedModels.length > 0 ? uploadedModels[0].url : ''
       };
       
       onUploadComplete(newProject);
       
-    } catch (error) {
+    } catch (error: any) {
       alert(`${t.alert.error}${error.message}`);
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -468,6 +620,78 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ onBack, onUploadComplete, lan
                      </div>
                   </div>
 
+                  {/* R2 Upload Section (Multiple Files) */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-slate-700 text-sm font-semibold ml-2 flex items-center gap-2">
+                      <Box className="w-4 h-4 text-[#f48120]" /> {/* Cloudflare Orange-ish */}
+                      {t.basicInfo.modelFile}
+                    </label>
+                    <div className="relative group">
+                        <input 
+                          type="file"
+                          multiple // Enable multiple files
+                          accept=".stl,.obj,.glb,.gltf,.dxf,.dwg,.pdf,.svg,.ai,.png"
+                          onChange={handleModelChange}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        />
+                        <div className={`w-full bg-slate-50 border-2 border-dashed ${modelFiles.length > 0 ? 'border-[#10b77f] bg-[#10b77f]/5' : 'border-slate-200'} rounded-2xl px-6 py-8 flex flex-col items-center justify-center text-center transition-all group-hover:border-[#10b77f]/50 group-hover:bg-slate-100`}>
+                            {modelFiles.length > 0 ? (
+                                <div className="w-full flex flex-col gap-2">
+                                    <div className="flex items-center justify-center gap-2 text-[#10b77f] mb-2">
+                                         <FileBox className="w-6 h-6" />
+                                         <span className="font-bold">{modelFiles.length} files selected</span>
+                                    </div>
+                                    <div className="grid gap-2 max-h-48 overflow-y-auto w-full px-2 z-20">
+                                        {modelFiles.map((file, idx) => (
+                                            <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-[#10b77f]/20 shadow-sm relative z-20">
+                                                <div className="flex items-center gap-3 overflow-hidden">
+                                                    <div className="bg-[#10b77f]/10 p-1.5 rounded-lg">
+                                                        <FileBox className="w-4 h-4 text-[#10b77f]" />
+                                                    </div>
+                                                    <div className="flex flex-col items-start min-w-0">
+                                                        <span className="font-medium text-sm truncate w-full text-slate-700">{file.name}</span>
+                                                        <span className="text-[10px] text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                                                    </div>
+                                                </div>
+                                                <button 
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation(); // Stop click from triggering file input
+                                                        removeModelFile(idx);
+                                                    }}
+                                                    className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors z-30"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-slate-400 text-xs mt-2">Click area to add more files</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <UploadCloud className="w-8 h-8 text-slate-400 mb-2 group-hover:scale-110 transition-transform" />
+                                    <p className="text-slate-600 font-medium">{t.basicInfo.modelDragDrop}</p>
+                                    <p className="text-slate-400 text-xs mt-1">{t.basicInfo.modelFormats}</p>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    {/* R2 Warning Alert */}
+                    {!isR2Configured && (
+                        <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-amber-700 text-sm">
+                            <AlertTriangle className="w-5 h-5 shrink-0" />
+                            <div>
+                                <p className="font-bold">R2 Key Configuration Needed</p>
+                                <p className="text-xs mt-1 text-amber-600">
+                                    To enable real file uploads, you must set your Cloudflare R2 Account ID, Access Key, and Secret Key in <code>components/AdminUpload.tsx</code>. Currently using mock uploads.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                  </div>
+
                   <div className="flex flex-col gap-2">
                     <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.difficulty}</label>
                     <div className="flex p-1 bg-slate-100 rounded-full w-fit">
@@ -478,7 +702,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ onBack, onUploadComplete, lan
                           onClick={() => setFormData({...formData, difficulty: level})}
                           className={`px-6 py-2 rounded-full text-sm font-semibold transition-all ${formData.difficulty === level ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
-                          {t.basicInfo.diffLevels[level] || level}
+                          {t.basicInfo.diffLevels[level as 'Easy' | 'Intermediate' | 'Advanced'] || level}
                         </button>
                       ))}
                     </div>
@@ -575,10 +799,10 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ onBack, onUploadComplete, lan
           ) : (
             /* Inventory View - Styled to match */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {inventory.length > 0 ? inventory.map((item) => (
+              {inventory.length > 0 ? inventory.map((item: any) => (
                 <div key={item.id} className="bg-white p-6 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100 hover:shadow-lg transition-all">
                   <div className="aspect-video bg-slate-100 rounded-2xl mb-4 overflow-hidden relative">
-                    <img src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
+                    <img src={item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80'} alt={item.title} className="w-full h-full object-cover" />
                     <div className="absolute top-3 left-3 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-[#10b77f] shadow-sm uppercase">{item.category}</div>
                   </div>
                   <h4 className="font-bold text-slate-900 mb-1">{item.title}</h4>

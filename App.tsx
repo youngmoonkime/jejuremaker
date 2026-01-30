@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
+import { createClient, User } from '@supabase/supabase-js';
 import Discovery from './components/Discovery';
 import ProjectDetail from './components/ProjectDetail';
 import Workspace from './components/Workspace';
 import AdminUpload from './components/AdminUpload';
+import Trending from './components/Trending';
+import Community from './components/Community';
+import AuthModal from './components/AuthModal';
 import { Project } from './types';
 
 // Supabase Configuration
 const supabaseUrl = 'https://jbkfsvinitavzyflcuwg.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impia2ZzdmluaXRhdnp5ZmxjdXdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDAxOTUsImV4cCI6MjA4NDk3NjE5NX0.Nn3_-8Oky-yZ7VwFiiWbhxKdWfqOSz1ddj93fztfMak';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-type ViewState = 'discovery' | 'detail' | 'workspace' | 'upload';
+type ViewState = 'discovery' | 'detail' | 'workspace' | 'upload' | 'trending' | 'community';
 export type Language = 'ko' | 'en';
 
 const INITIAL_PROJECTS: Project[] = [
@@ -18,7 +23,7 @@ const INITIAL_PROJECTS: Project[] = [
   { id: 'static-3', title: 'Geometric Glass Bottle Lamp', maker: 'EcoLightz', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAlS4kFqDJmMraQ5iv0a245PyOXT8XYd8MBlFFLxPJtdrqUn0u9yxkKxvyyNEdCK6sw0qi0Fdj8KvbWO1W6eYKENQoUuZ7R_PyP-FnTHwQQ1DGW23HkSA-3NeRWPI9u_wt6EPThHJdVowcxji27rda8BeClTySETj_QVB7Tk6dHVnNktPdhJAJgowciBu-oL8alTxfx51rcqoM8sUGo-bbFebqRgQITmWy5eXs9X0QHF40H5VidAwilMdOawkCfpDg5JjhzrI1hXro', category: 'Glass', time: '6h 15m', difficulty: 'Hard', isAiIdea: true },
   { id: 'static-4', title: 'PLA Recycled Vase - Voronoi', maker: 'PrintMaster', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVQHmmS6kEqwz9kbWlPRhdyy0rta4aHB3GAgK5Rm_Qn8cb3YVvFE_AFKoQxAy6eIUhnKcvD0ObXAigxK1BXehW9yFwrQTZyEDYslhE6bU6NnjaEr1HEeUwZ0raaBM2qGGcSGpOm3sTBZmH3Fv14XlpRwZkMJ6kOdSxOkearaFWYepnSc8NbJOpnhPBFGTwpju8j0-Ya9eTYL7vBbJekMVO1pl53Yp0dc0jlW6Wph2dNUDIQPVdyr5HGMvKYU0l4ZUuLaHpHLFQHjI', category: '3D Print', time: '8h', difficulty: 'Easy' },
   { id: 'static-5', title: 'Upcycled Mold Concrete Planters', maker: 'UrbanJungle', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBb0TA0SOf0Uqj3J-p97g6i8C8z3O_0HdMCVan6SsH2SyoTgZzI6LaxF_7LO9qAAaZBZfalY7ilHXKsBfofkNIERYAFM2CAcgUirkA3GBJJ7T9JlAaDJ1aCz8GWGOUVEfs8VyyErsFOT-bkXyoOSmdyi_w1_YfCkprIPFY7-exWQDDvYlNqjboJDdoNjK5MX6XhoXAPlH1e5OoxeqDbPfVfTWUuxSTaD4QsIY4KRo1QpflpBRCqALG9THR1Fy-fTon6zft8CyjiiV4', category: 'Concrete', time: '24h', difficulty: 'Medium' },
-  { id: 'static-6', title: 'Floating Pipe Bookshelves', maker: 'IndustrialChic', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuB7ocu_BWmKGyU8AtIO6vbX0pwjEFsRYpFZHC1NMf3qHUjpB_Bop6bu4OmI0RJzUwWwF7aunaTQvgHSa7SMrAbU2P43_55-IhbPRNPVf4wSHgYEgkT5JpDAfhEKcorGuIKgTehD4tE5hT4PPH-MfgL6LfB_03cpMyTpoPs8kNOYNo5et5VZ87v8L5MlUy-vXYtVLg0jMZ9TyArh2gpfvBjuRuDqUw_wqyX2_xuGzz_Oc1RXxMJwkA2rzJTSiEpkfNF7kTkQ0FRysbM', category: 'Metal', time: '2h', difficulty: 'Medium', isAiRemix: true },
+  { id: 'static-6', title: 'Floating Pipe Bookshelves', maker: 'IndustrialChic', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuB7ocu_BWmKGyU8AtIO6vbX0pwjEFsRYpFZHC1NMf3qHUjpB_Bop6bu4OmI0RJzUwWwF7aunaTQvgHSa7SMrAbU2P43_55-IhbPRNPVf4wSHgYEgkT5JpDAfhEKcorGuIKgTehD4tE5hT4PPH-MfgL6LfB_03cpMyTpoPs8kNOYNo5et5VZ87v8L5MlUy-vXYtVLg0jMZ9TyArh2gpfvBjuRuDqUw_wqyX2_xuGzz_Oc1RXxMJwkA2rzJTSiEpkfNF7kTkQ0FRysbM', category: 'Metal', time: '2h', difficulty: 'Medium', isAiRemix: true, description: 'An industrial style bookshelf made from recycled plumbing pipes.', steps: [{title: 'Preparation', desc: 'Clean pipes.'}, {title: 'Assembly', desc: 'Connect pipes.'}] },
 ];
 
 const App: React.FC = () => {
@@ -27,6 +32,11 @@ const App: React.FC = () => {
   const [language, setLanguage] = useState<Language>('ko');
   const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+
+  // Authentication State
+  const [user, setUser] = useState<User | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authTargetView, setAuthTargetView] = useState<ViewState | null>(null);
 
   // Apply dark mode class to html element
   useEffect(() => {
@@ -37,31 +47,55 @@ const App: React.FC = () => {
     }
   }, [isDarkMode]);
 
-  // Fetch projects from Supabase on mount
+  // Auth Listener & Projects Fetch
   useEffect(() => {
+    // 1. Check active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    // 2. Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        // Close modal on successful login
+        setShowAuthModal(false);
+        // Redirect if there was a pending target
+        if (authTargetView) {
+            setCurrentView(authTargetView);
+            setAuthTargetView(null);
+        }
+      }
+    });
+
+    // 3. Fetch Projects using Supabase SDK
     const fetchProjects = async () => {
       try {
-        const response = await fetch(`${supabaseUrl}/rest/v1/items?select=*&order=created_at.desc`, {
-          headers: {
-            'Authorization': `Bearer ${supabaseKey}`,
-            'apikey': supabaseKey
-          }
-        });
+        const { data, error } = await supabase
+          .from('items')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          throw error;
+        }
         
-        if (response.ok) {
-          const data = await response.json();
+        if (data) {
           // Map DB items to Project type
           const mappedProjects: Project[] = data.map((item: any) => ({
             id: item.id.toString(),
             title: item.title,
             maker: 'Master Kim', // Default maker for new uploads
-            image: item.image_url,
+            image: item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80', // Fallback for missing images
             category: item.category,
             time: item.estimated_time || '2h',
             difficulty: (item.difficulty as 'Easy' | 'Medium' | 'Hard') || 'Medium',
             isAiRemix: item.is_ai_generated,
             description: item.title + ' - Custom project', // Simplified fallback
-            steps: item.metadata?.fabrication_guide || []
+            steps: item.metadata?.fabrication_guide || [],
+            downloadUrl: item.metadata?.download_url || '' // Map the download link
           }));
           
           setProjects([...mappedProjects, ...INITIAL_PROJECTS]);
@@ -72,13 +106,28 @@ const App: React.FC = () => {
     };
 
     fetchProjects();
-  }, []);
+
+    return () => subscription.unsubscribe();
+  }, [authTargetView]);
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
   const toggleLanguage = () => setLanguage(prev => prev === 'ko' ? 'en' : 'ko');
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    alert(language === 'ko' ? '로그아웃 되었습니다.' : 'Logged out successfully.');
+    setCurrentView('discovery');
+  };
+
+  const handleLoginClick = (targetView?: ViewState) => {
+    if (targetView) {
+        setAuthTargetView(targetView);
+    }
+    setShowAuthModal(true);
+  };
+
   const handleUploadComplete = (newProject: Project) => {
-    // Add new project to state immediately for responsiveness
     setProjects(prev => [newProject, ...prev]);
     setCurrentView('discovery');
   };
@@ -88,19 +137,21 @@ const App: React.FC = () => {
     setCurrentView('detail');
   };
 
-  // Simple view router
   const renderView = () => {
     switch (currentView) {
       case 'discovery':
         return (
           <Discovery 
-            onNavigate={(view) => setCurrentView(view)} 
+            onNavigate={(view: any) => setCurrentView(view)} 
             onProjectSelect={handleProjectSelect}
             isDarkMode={isDarkMode}
             toggleDarkMode={toggleDarkMode}
             language={language}
             toggleLanguage={toggleLanguage}
             projects={projects}
+            user={user}
+            onLoginClick={handleLoginClick}
+            onLogout={handleLogout}
           />
         );
       case 'detail':
@@ -113,6 +164,9 @@ const App: React.FC = () => {
             toggleDarkMode={toggleDarkMode}
             language={language}
             toggleLanguage={toggleLanguage}
+            user={user}
+            onLoginClick={handleLoginClick}
+            onNavigate={(view: any) => setCurrentView(view)}
           />
         );
       case 'workspace':
@@ -125,21 +179,51 @@ const App: React.FC = () => {
       case 'upload':
         return (
           <AdminUpload 
+            supabase={supabase}
             onBack={() => setCurrentView('discovery')}
             onUploadComplete={handleUploadComplete}
             language={language}
           />
         );
+      case 'trending':
+        return (
+            <Trending 
+                onNavigate={(view: any) => setCurrentView(view)}
+                isDarkMode={isDarkMode}
+                toggleDarkMode={toggleDarkMode}
+                language={language}
+                toggleLanguage={toggleLanguage}
+                user={user}
+                onLoginClick={handleLoginClick}
+                onLogout={handleLogout}
+            />
+        );
+      case 'community':
+        return (
+            <Community
+                onNavigate={(view: any) => setCurrentView(view)}
+                isDarkMode={isDarkMode}
+                toggleDarkMode={toggleDarkMode}
+                language={language}
+                toggleLanguage={toggleLanguage}
+                user={user}
+                onLoginClick={handleLoginClick}
+                onLogout={handleLogout}
+            />
+        );
       default:
         return (
           <Discovery 
-            onNavigate={(view) => setCurrentView(view)} 
+            onNavigate={(view: any) => setCurrentView(view)} 
             onProjectSelect={handleProjectSelect}
             isDarkMode={isDarkMode}
             toggleDarkMode={toggleDarkMode}
             language={language}
             toggleLanguage={toggleLanguage}
             projects={projects}
+            user={user}
+            onLoginClick={handleLoginClick}
+            onLogout={handleLogout}
           />
         );
     }
@@ -148,6 +232,15 @@ const App: React.FC = () => {
   return (
     <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'dark bg-background-dark' : 'bg-background-light'}`}>
       {renderView()}
+      
+      {/* Global Auth Modal */}
+      {showAuthModal && (
+        <AuthModal 
+            supabase={supabase}
+            onClose={() => setShowAuthModal(false)} 
+            currentView={authTargetView || undefined}
+        />
+      )}
     </div>
   );
 };

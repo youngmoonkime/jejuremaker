@@ -11,6 +11,17 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
+      // Polyfills for AWS SDK in browser
+      window.global = window;
+      window.process = { env: {} };
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
+    <script>
+      if (typeof window.Buffer === 'undefined') {
+        window.Buffer = buffer.Buffer;
+      }
+    </script>
+    <script>
       tailwind.config = {
         darkMode: 'class',
         theme: {
@@ -33,17 +44,49 @@
               surface: {
                 light: '#ffffff',
                 dark: '#1a1a1a',
+                darker: '#27272a',
+              },
+              // Added for Trending View compatibility
+              text: {
+                light: '#1f2937',
+                dark: '#e5e7eb',
+              },
+              muted: {
+                light: '#6b7280',
+                dark: '#9ca3af',
               }
             },
             animation: {
               'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'shine': 'shine 1.5s infinite',
+            },
+            keyframes: {
+              shine: {
+                '100%': { left: '125%' },
+              }
+            },
+            boxShadow: {
+                'soft': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+                'glow': '0 0 15px -3px rgba(16, 185, 129, 0.3)',
             }
           },
         },
       }
     </script>
     <style>
-      /* Custom scrollbar hiding for cleaner UI */
+      /* Custom scrollbar styling from Community design */
+      ::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+          background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+          background-color: rgba(156, 163, 175, 0.3);
+          border-radius: 20px;
+      }
+      
       .scrollbar-hide::-webkit-scrollbar {
           display: none;
       }
@@ -51,11 +94,39 @@
           -ms-overflow-style: none;
           scrollbar-width: none;
       }
+      .no-scrollbar::-webkit-scrollbar {
+          display: none;
+      }
+      .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+      .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+      }
+      .hide-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+      
       .grid-pattern {
           background-size: 40px 40px;
           background-image: 
               linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
               linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+      }
+      
+      .backdrop-blur-md {
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      
+      /* Smooth snap scrolling */
+      .snap-x {
+        scroll-snap-type: x mandatory;
+      }
+      .snap-start {
+        scroll-snap-align: start;
       }
     </style>
   <script type="importmap">
@@ -64,7 +135,9 @@
     "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "@aws-sdk/client-s3": "https://esm.sh/@aws-sdk/client-s3@3.454.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3"
   }
 }
 </script>

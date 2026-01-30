@@ -26,6 +26,7 @@ export interface Project {
   isAiIdea?: boolean;
   description?: string;
   steps?: Step[];
+  downloadUrl?: string;
 }
 
 export interface Message {

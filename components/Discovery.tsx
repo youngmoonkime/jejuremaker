@@ -1,15 +1,19 @@
 import React from 'react';
 import { Project, Maker } from '../types';
 import { Language } from '../App';
+import { User } from '@supabase/supabase-js';
 
 interface DiscoveryProps {
-  onNavigate: (view: 'detail' | 'upload') => void;
+  onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community') => void;
   onProjectSelect: (project: Project) => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
   language: Language;
   toggleLanguage: () => void;
   projects: Project[];
+  user: User | null;
+  onLoginClick: (target?: any) => void;
+  onLogout: () => void;
 }
 
 // Translations
@@ -43,6 +47,8 @@ const TRANSLATIONS = {
     newest: '최신순',
     topRated: '평점순',
     loadMore: '더 보기',
+    login: '로그인',
+    logout: '로그아웃',
     difficulty: {
       Easy: '쉬움',
       Medium: '보통',
@@ -78,6 +84,8 @@ const TRANSLATIONS = {
     newest: 'Newest',
     topRated: 'Top Rated',
     loadMore: 'Load more projects',
+    login: 'Login',
+    logout: 'Logout',
     difficulty: {
       Easy: 'Easy',
       Medium: 'Medium',
@@ -93,7 +101,7 @@ const MAKERS: Maker[] = [
   { name: 'PrintMaster', avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVQHmmS6kEqwz9kbWlPRhdyy0rta4aHB3GAgK5Rm_Qn8cb3YVvFE_AFKoQxAy6eIUhnKcvD0ObXAigxK1BXehW9yFwrQTZyEDYslhE6bU6NnjaEr1HEeUwZ0raaBM2qGGcSGpOm3sTBZmH3Fv14XlpRwZkMJ6kOdSxOkearaFWYepnSc8NbJOpnhPBFGTwpju8j0-Ya9eTYL7vBbJekMVO1pl53Yp0dc0jlW6Wph2dNUDIQPVdyr5HGMvKYU0l4ZUuLaHpHLFQHjI', projects: 65, likes: '2.9k' },
 ];
 
-const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDarkMode, toggleDarkMode, language, toggleLanguage, projects }) => {
+const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDarkMode, toggleDarkMode, language, toggleLanguage, projects, user, onLoginClick, onLogout }) => {
   const t = TRANSLATIONS[language];
 
   return (
@@ -108,7 +116,6 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
             <span className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">Jeju <span className="text-primary">Re-Maker</span></span>
           </div>
 
-          {/* Search bar removed from header as requested */}
           <div className="hidden md:flex flex-1 mx-8"></div>
 
           <div className="flex items-center gap-4">
@@ -133,16 +140,30 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
               <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
             </button>
             <button 
-              onClick={() => onNavigate('upload')}
+              onClick={() => user ? onNavigate('upload') : onLoginClick('upload')}
               className="flex items-center gap-2 pl-3 pr-1 py-1 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors group">
               <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{t.create}</span>
               <div className="w-7 h-7 bg-primary group-hover:bg-primary-dark rounded-full flex items-center justify-center text-white transition-colors">
                 <span className="material-icons-round text-sm">upload</span>
               </div>
             </button>
-            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all">
-              <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs" alt="User" className="w-full h-full object-cover" />
-            </div>
+            
+            {user ? (
+              <div 
+                onClick={onLogout}
+                className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group"
+                title={t.logout}
+              >
+                <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs" alt="User" className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <button 
+                onClick={() => onLoginClick()}
+                className="px-4 py-2 text-sm font-bold text-white bg-primary hover:bg-primary-dark rounded-xl transition-colors shadow-lg shadow-primary/20"
+              >
+                {t.login}
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -191,18 +212,18 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
           </div>
 
           <nav className="space-y-1">
-            <a href="#" className="flex items-center gap-3 px-4 py-3 bg-gray-100 dark:bg-gray-800 text-primary rounded-xl font-medium transition-colors">
+            <button onClick={() => onNavigate('discovery')} className="w-full flex items-center gap-3 px-4 py-3 bg-gray-100 dark:bg-gray-800 text-primary rounded-xl font-medium transition-colors">
               <span className="material-icons-round">explore</span>
               {t.discover}
-            </a>
-            <a href="#" className="flex items-center gap-3 px-4 py-3 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white rounded-xl font-medium transition-colors">
+            </button>
+            <button onClick={() => onNavigate('trending')} className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white rounded-xl font-medium transition-colors">
               <span className="material-icons-round">trending_up</span>
               {t.trending}
-            </a>
-            <a href="#" className="flex items-center gap-3 px-4 py-3 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white rounded-xl font-medium transition-colors">
+            </button>
+            <button onClick={() => onNavigate('community')} className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white rounded-xl font-medium transition-colors">
               <span className="material-icons-round">people</span>
               {t.community}
-            </a>
+            </button>
           </nav>
 
           <div>
