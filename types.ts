@@ -31,9 +31,13 @@ export interface Project {
 
 export interface Message {
   id: string;
-  sender: 'user' | 'expert' | 'system';
+  sender: 'user' | 'expert' | 'ai' | 'system';
   text?: string;
   timestamp: string;
   avatar?: string;
   attachmentName?: string;
+  attachmentType?: 'image' | '3d_model'; // Added for AI generation results
+  attachmentUrl?: string;
 }
+
+export type ChatMode = 'human' | 'ai';

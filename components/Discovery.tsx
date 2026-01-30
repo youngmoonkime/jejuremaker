@@ -14,6 +14,7 @@ interface DiscoveryProps {
   user: User | null;
   onLoginClick: (target?: any) => void;
   onLogout: () => void;
+  userTokens: number;
 }
 
 // Translations
@@ -101,7 +102,7 @@ const MAKERS: Maker[] = [
   { name: 'PrintMaster', avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVQHmmS6kEqwz9kbWlPRhdyy0rta4aHB3GAgK5Rm_Qn8cb3YVvFE_AFKoQxAy6eIUhnKcvD0ObXAigxK1BXehW9yFwrQTZyEDYslhE6bU6NnjaEr1HEeUwZ0raaBM2qGGcSGpOm3sTBZmH3Fv14XlpRwZkMJ6kOdSxOkearaFWYepnSc8NbJOpnhPBFGTwpju8j0-Ya9eTYL7vBbJekMVO1pl53Yp0dc0jlW6Wph2dNUDIQPVdyr5HGMvKYU0l4ZUuLaHpHLFQHjI', projects: 65, likes: '2.9k' },
 ];
 
-const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDarkMode, toggleDarkMode, language, toggleLanguage, projects, user, onLoginClick, onLogout }) => {
+const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDarkMode, toggleDarkMode, language, toggleLanguage, projects, user, onLoginClick, onLogout, userTokens }) => {
   const t = TRANSLATIONS[language];
 
   return (
@@ -119,6 +120,15 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
           <div className="hidden md:flex flex-1 mx-8"></div>
 
           <div className="flex items-center gap-4">
+            
+            {/* Token Display (If User) */}
+            {user && (
+                <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 rounded-full border border-indigo-100 dark:border-indigo-800/50">
+                    <span className="text-base">💎</span>
+                    <span className="text-sm font-bold text-indigo-900 dark:text-indigo-200">{userTokens}</span>
+                </div>
+            )}
+
             {/* Language Toggle */}
             <button 
               onClick={toggleLanguage}

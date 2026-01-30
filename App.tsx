@@ -33,8 +33,9 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
-  // Authentication State
+  // Authentication & Token State
   const [user, setUser] = useState<User | null>(null);
+  const [userTokens, setUserTokens] = useState(25); // Default free tokens
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authTargetView, setAuthTargetView] = useState<ViewState | null>(null);
 
@@ -152,6 +153,7 @@ const App: React.FC = () => {
             user={user}
             onLoginClick={handleLoginClick}
             onLogout={handleLogout}
+            userTokens={userTokens}
           />
         );
       case 'detail':
@@ -170,10 +172,16 @@ const App: React.FC = () => {
           />
         );
       case 'workspace':
+        // Check if the selected project is an AI remix or idea
+        const isAi = !!(selectedProject?.isAiRemix || selectedProject?.isAiIdea);
         return (
           <Workspace 
             onExit={() => setCurrentView('detail')} 
             language={language}
+            userTokens={userTokens}
+            setUserTokens={setUserTokens}
+            initialMode={isAi ? 'ai' : 'human'}
+            isAiProject={isAi}
           />
         );
       case 'upload':
@@ -224,6 +232,7 @@ const App: React.FC = () => {
             user={user}
             onLoginClick={handleLoginClick}
             onLogout={handleLogout}
+            userTokens={userTokens}
           />
         );
     }

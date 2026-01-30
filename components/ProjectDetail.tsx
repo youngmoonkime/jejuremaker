@@ -31,6 +31,7 @@ const TRANSLATIONS = {
     carbonReduction: '탄소 절감',
     impactDesc: '약 20개의 플라스틱 병이 매립되는 것을 방지합니다.',
     findMaker: '메이커 연결',
+    connectAI: 'AI 코파일럿 연결',
     downloadGuide: '2D/3D도면 다운로드',
     printTime: '출력 시간',
     difficulty: '난이도',
@@ -60,6 +61,7 @@ const TRANSLATIONS = {
     carbonReduction: 'Carbon Reduction',
     impactDesc: 'Prevents approx. 20 bottles from entering landfills.',
     findMaker: 'Connect Maker',
+    connectAI: 'Connect AI Co-Pilot',
     downloadGuide: 'Download Guide',
     printTime: 'Print Time',
     difficulty: 'Difficulty',
@@ -114,6 +116,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, onOpenWorkspace, 
   const displayCategory = project?.category || t.printing;
   const displayTime = project?.time || '4h 20m';
   const displayDifficulty = project?.difficulty || 'Medium';
+  
+  // Check if project is AI generated
+  const isAiProject = project?.isAiRemix || project?.isAiIdea;
 
   // Logic for fabrication steps
   // If the project has custom steps, use them. Otherwise use the default steps from translation.
@@ -325,10 +330,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, onOpenWorkspace, 
                 <div className="space-y-3">
                   <button 
                     onClick={handleConnectMaker}
-                    className="w-full py-4 px-6 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl font-bold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all flex items-center justify-center space-x-2"
+                    className={`w-full py-4 px-6 text-white rounded-xl font-bold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all flex items-center justify-center space-x-2
+                       ${isAiProject ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-900 dark:bg-white dark:text-gray-900'}
+                    `}
                   >
-                    <span>{t.findMaker}</span>
-                    <span className="material-icons-round text-sm">arrow_forward</span>
+                    <span>{isAiProject ? t.connectAI : t.findMaker}</span>
+                    <span className="material-icons-round text-sm">{isAiProject ? 'smart_toy' : 'arrow_forward'}</span>
                   </button>
                   <button 
                     onClick={handleDownload}

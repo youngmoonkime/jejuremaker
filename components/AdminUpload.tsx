@@ -642,7 +642,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                                          <span className="font-bold">{modelFiles.length} files selected</span>
                                     </div>
                                     <div className="grid gap-2 max-h-48 overflow-y-auto w-full px-2 z-20">
-                                        {modelFiles.map((file, idx) => (
+                                        {modelFiles.map((file: File, idx) => (
                                             <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-[#10b77f]/20 shadow-sm relative z-20">
                                                 <div className="flex items-center gap-3 overflow-hidden">
                                                     <div className="bg-[#10b77f]/10 p-1.5 rounded-lg">
