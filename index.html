@@ -1,134 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Jeju Re-Maker</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      // Polyfills for AWS SDK in browser
-      window.global = window;
-      window.process = { env: {} };
-    </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
-    <script>
-      if (typeof window.Buffer === 'undefined') {
-        window.Buffer = buffer.Buffer;
-      }
-    </script>
-    <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-              display: ['Inter', 'sans-serif'],
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jeju Re-Maker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+    rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Polyfills for AWS SDK in browser
+    window.global = window;
+    window.process = { env: {} };
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
+  <script>
+    if (typeof window.Buffer === 'undefined') {
+      window.Buffer = buffer.Buffer;
+    }
+  </script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            primary: {
+              DEFAULT: '#17cf63', // Bright Green
+              dark: '#10b981',
+              light: '#4ade80',
             },
-            colors: {
-              primary: {
-                DEFAULT: '#17cf63', // Bright Green
-                dark: '#10b981',
-                light: '#4ade80',
-              },
-              background: {
-                light: '#f6f8f7',
-                dark: '#112118',
-                viewer: '#111111',
-              },
-              surface: {
-                light: '#ffffff',
-                dark: '#1a1a1a',
-                darker: '#27272a',
-              },
-              // Added for Trending View compatibility
-              text: {
-                light: '#1f2937',
-                dark: '#e5e7eb',
-              },
-              muted: {
-                light: '#6b7280',
-                dark: '#9ca3af',
-              }
+            background: {
+              light: '#f6f8f7',
+              dark: '#112118',
+              viewer: '#111111',
             },
-            animation: {
-              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-              'shine': 'shine 1.5s infinite',
+            surface: {
+              light: '#ffffff',
+              dark: '#1a1a1a',
+              darker: '#27272a',
             },
-            keyframes: {
-              shine: {
-                '100%': { left: '125%' },
-              }
+            // Added for Trending View compatibility
+            text: {
+              light: '#1f2937',
+              dark: '#e5e7eb',
             },
-            boxShadow: {
-                'soft': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-                'glow': '0 0 15px -3px rgba(16, 185, 129, 0.3)',
+            muted: {
+              light: '#6b7280',
+              dark: '#9ca3af',
             }
           },
+          animation: {
+            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'shine': 'shine 1.5s infinite',
+          },
+          keyframes: {
+            shine: {
+              '100%': { left: '125%' },
+            }
+          },
+          boxShadow: {
+            'soft': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+            'glow': '0 0 15px -3px rgba(16, 185, 129, 0.3)',
+          }
         },
-      }
-    </script>
-    <style>
-      /* Custom scrollbar styling from Community design */
-      ::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-          background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-          background-color: rgba(156, 163, 175, 0.3);
-          border-radius: 20px;
-      }
-      
-      .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-      }
-      .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-      }
-      .no-scrollbar::-webkit-scrollbar {
-          display: none;
-      }
-      .no-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-      }
-      .hide-scrollbar::-webkit-scrollbar {
-          display: none;
-      }
-      .hide-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-      }
-      
-      .grid-pattern {
-          background-size: 40px 40px;
-          background-image: 
-              linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-              linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-      }
-      
-      .backdrop-blur-md {
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-      }
-      
-      /* Smooth snap scrolling */
-      .snap-x {
-        scroll-snap-type: x mandatory;
-      }
-      .snap-start {
-        scroll-snap-align: start;
-      }
-    </style>
+      },
+    }
+  </script>
+  <style>
+    /* Custom scrollbar styling from Community design */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background-color: rgba(156, 163, 175, 0.3);
+      border-radius: 20px;
+    }
+
+    .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+    }
+
+    .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    .hide-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .hide-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    .grid-pattern {
+      background-size: 40px 40px;
+      background-image:
+        linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    }
+
+    .backdrop-blur-md {
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    /* Smooth snap scrolling */
+    .snap-x {
+      scroll-snap-type: x mandatory;
+    }
+
+    .snap-start {
+      scroll-snap-align: start;
+    }
+  </style>
   <script type="importmap">
 {
   "imports": {
@@ -136,13 +147,17 @@
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
-    "@aws-sdk/client-s3": "https://esm.sh/@aws-sdk/client-s3@3.454.0",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3"
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3",
+    "three": "https://esm.sh/three@0.160.0",
+    "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
   }
 }
 </script>
 </head>
-  <body class="bg-background-light text-gray-900 antialiased">
-    <div id="root"></div>
-  </body>
+
+<body class="bg-background-light text-gray-900 antialiased">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
 </html>

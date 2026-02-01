@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { Project, Maker } from '../types';
 import { Language } from '../App';
 import { User } from '@supabase/supabase-js';
+import WizardModal from './WizardModal';
 
 interface DiscoveryProps {
-  onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community') => void;
+  onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community' | 'profile') => void;
   onProjectSelect: (project: Project) => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
@@ -15,7 +16,30 @@ interface DiscoveryProps {
   onLoginClick: (target?: any) => void;
   onLogout: () => void;
   userTokens: number;
+  setUserTokens: (tokens: number | ((prev: number) => number)) => void;
+  onAddProject: (project: Project) => void;
+  onLikeToggle: (projectId: string) => void;
+  likedProjects: Set<string>;
 }
+
+// Material icon mapping for better UX
+const MATERIAL_ICONS: Record<string, string> = {
+  '플라스틱': 'local_drink',
+  'Plastic': 'local_drink',
+  '종이': 'description',
+  'Paper': 'description',
+  '유리': 'wine_bar',
+  'Glass': 'wine_bar',
+  '나무': 'forest',
+  'Wood': 'forest',
+  '금속': 'construction',
+  'Metal': 'construction',
+  '천': 'checkroom',
+  'Textile': 'checkroom',
+  '병뚜껑': 'radio_button_checked',
+  'Bottle Cap': 'radio_button_checked',
+  'default': 'category'
+};
 
 // Translations
 const TRANSLATIONS = {
@@ -50,6 +74,14 @@ const TRANSLATIONS = {
     loadMore: '더 보기',
     login: '로그인',
     logout: '로그아웃',
+    myProfile: '내 정보',
+    insufficientTokens: '토큰이 부족합니다',
+    wizardStep1: '재료 분석 중...',
+    wizardStep2: '무엇을 만들고 싶으세요?',
+    wizardStep3: '최종 생성',
+    wizardNext: '다음',
+    wizardGenerate: '생성하기',
+    wizardClose: '닫기',
     difficulty: {
       Easy: '쉬움',
       Medium: '보통',
@@ -102,8 +134,41 @@ const MAKERS: Maker[] = [
   { name: 'PrintMaster', avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVQHmmS6kEqwz9kbWlPRhdyy0rta4aHB3GAgK5Rm_Qn8cb3YVvFE_AFKoQxAy6eIUhnKcvD0ObXAigxK1BXehW9yFwrQTZyEDYslhE6bU6NnjaEr1HEeUwZ0raaBM2qGGcSGpOm3sTBZmH3Fv14XlpRwZkMJ6kOdSxOkearaFWYepnSc8NbJOpnhPBFGTwpju8j0-Ya9eTYL7vBbJekMVO1pl53Yp0dc0jlW6Wph2dNUDIQPVdyr5HGMvKYU0l4ZUuLaHpHLFQHjI', projects: 65, likes: '2.9k' },
 ];
 
-const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDarkMode, toggleDarkMode, language, toggleLanguage, projects, user, onLoginClick, onLogout, userTokens }) => {
+const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDarkMode, toggleDarkMode, language, toggleLanguage, projects, user, onLoginClick, onLogout, userTokens, setUserTokens, onAddProject, onLikeToggle, likedProjects }) => {
   const t = TRANSLATIONS[language];
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Extract unique materials from projects to create dynamic categories
+  const materialCategories = useMemo(() => {
+    const materialsSet = new Set<string>();
+    projects.forEach(project => {
+      // Check both material and category fields
+      const material = (project as any).material || project.category;
+      if (material) {
+        materialsSet.add(material);
+      }
+    });
+    return Array.from(materialsSet).sort();
+  }, [projects]);
+
+  // Filter projects based on selected category
+  const filteredProjects = useMemo(() => {
+    if (selectedCategory === 'all') {
+      return projects;
+    }
+    return projects.filter(project => {
+      const material = (project as any).material || project.category;
+      return material === selectedCategory;
+    });
+  }, [projects, selectedCategory]);
+
+  // Get icon for a material
+  const getMaterialIcon = (material: string) => {
+    return MATERIAL_ICONS[material] || MATERIAL_ICONS['default'];
+  };
 
   return (
     <div className={`min-h-screen text-gray-800 dark:text-gray-100 bg-background-light dark:bg-background-dark transition-colors duration-300`}>
@@ -117,20 +182,35 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
             <span className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">Jeju <span className="text-primary">Re-Maker</span></span>
           </div>
 
-          <div className="hidden md:flex flex-1 mx-8"></div>
+          {/* Search Input */}
+          <div className="hidden md:flex flex-1 mx-8 max-w-2xl">
+            <div className="bg-white dark:bg-gray-800 p-2 rounded-full shadow-lg flex items-center w-full transition-all duration-300 focus-within:shadow-xl border border-gray-200 dark:border-gray-700">
+              <div className="pl-4 pr-2 text-gray-400">
+                <span className="material-icons-round">search</span>
+              </div>
+              <input
+                type="text"
+                placeholder={t.heroPlaceholder}
+                className="flex-1 bg-transparent border-none focus:ring-0 text-gray-800 dark:text-white placeholder-gray-400 text-sm"
+              />
+              <button className="bg-primary hover:bg-primary-dark text-white rounded-full p-2.5 transition-colors shadow-lg shadow-primary/30">
+                <span className="material-icons-round text-sm">arrow_forward</span>
+              </button>
+            </div>
+          </div>
 
           <div className="flex items-center gap-4">
-            
+
             {/* Token Display (If User) */}
             {user && (
-                <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 rounded-full border border-indigo-100 dark:border-indigo-800/50">
-                    <span className="text-base">💎</span>
-                    <span className="text-sm font-bold text-indigo-900 dark:text-indigo-200">{userTokens}</span>
-                </div>
+              <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 rounded-full border border-indigo-100 dark:border-indigo-800/50">
+                <span className="text-base">💎</span>
+                <span className="text-sm font-bold text-indigo-900 dark:text-indigo-200">{userTokens}</span>
+              </div>
             )}
 
             {/* Language Toggle */}
-            <button 
+            <button
               onClick={toggleLanguage}
               className="px-3 py-1.5 rounded-lg font-bold text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             >
@@ -138,7 +218,7 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
             </button>
 
             {/* Dark Mode Toggle */}
-            <button 
+            <button
               onClick={toggleDarkMode}
               className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
             >
@@ -149,7 +229,7 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
               <span className="material-icons-round">notifications_none</span>
               <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
             </button>
-            <button 
+            <button
               onClick={() => user ? onNavigate('upload') : onLoginClick('upload')}
               className="flex items-center gap-2 pl-3 pr-1 py-1 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors group">
               <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{t.create}</span>
@@ -157,17 +237,45 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
                 <span className="material-icons-round text-sm">upload</span>
               </div>
             </button>
-            
+
             {user ? (
-              <div 
-                onClick={onLogout}
-                className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group"
-                title={t.logout}
-              >
-                <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs" alt="User" className="w-full h-full object-cover" />
+              <div className="relative">
+                <div
+                  onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                  className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group"
+                  title={t.logout}
+                >
+                  <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs" alt="User" className="w-full h-full object-cover" />
+                </div>
+
+                {showProfileDropdown && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50">
+                    <button
+                      onClick={() => {
+                        setShowProfileDropdown(false);
+                        onNavigate('profile');
+                      }}
+                      className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2 text-gray-700 dark:text-gray-200"
+                    >
+                      <span className="material-icons-round text-primary">person</span>
+                      <span className="font-medium">{t.myProfile}</span>
+                    </button>
+                    <div className="border-t border-gray-100 dark:border-gray-700"></div>
+                    <button
+                      onClick={() => {
+                        setShowProfileDropdown(false);
+                        onLogout();
+                      }}
+                      className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2 text-red-600 dark:text-red-400"
+                    >
+                      <span className="material-icons-round">logout</span>
+                      <span className="font-medium">{t.logout}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
-              <button 
+              <button
                 onClick={() => onLoginClick()}
                 className="px-4 py-2 text-sm font-bold text-white bg-primary hover:bg-primary-dark rounded-xl transition-colors shadow-lg shadow-primary/20"
               >
@@ -191,7 +299,10 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
               </div>
               <h3 className="font-bold text-lg mb-2 leading-tight dark:text-white">{t.gotScrap}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{t.uploadPhoto}</p>
-              <button className="w-full py-2.5 bg-primary hover:bg-primary-dark text-white rounded-xl text-sm font-medium shadow-lg shadow-primary/20 transition-all duration-300 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setShowWizard(true)}
+                className="w-full py-2.5 bg-primary hover:bg-primary-dark text-white rounded-xl text-sm font-medium shadow-lg shadow-primary/20 transition-all duration-300 flex items-center justify-center gap-2"
+              >
                 <span>{t.analyzeNow}</span>
               </button>
             </div>
@@ -267,39 +378,96 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
 
         {/* Main Content */}
         <main className="flex-1 min-w-0">
-          {/* Hero Banner */}
-          <div className="mb-12 relative rounded-3xl overflow-hidden h-72 flex items-center justify-center bg-gray-900 shadow-xl group">
-            <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuCApCDGbAHCEjCS_6QtOjIrDK6gXNFE80PgPbC-OFpipS8vgyPyBfuM4cyy0i_hiZ7lgxovLATSoj4HF6K7VNBSilJJQ2s9VhPvSHVNxmEsTfVTbZ4EFlK6zSO50JYPgsvPQyzXnrx8l92hZJY6K5nPxm8IPE2W90OKUDUY6RJ-w9Hxt3q_WAVO3MamPsVJAYEKEw35uS60fNtodlYREf_xj1coAplnJ-SCmKQzfY6kADsiab0wtcok3Ctu1SSXs1fJ9R9_XDirbdI" alt="Workshop" className="absolute inset-0 w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform duration-700" />
-            <div className="absolute inset-0 bg-gradient-to-t from-gray-900/90 to-transparent"></div>
-            <div className="relative z-10 text-center w-full max-w-2xl px-4">
-              <h1 className="text-3xl md:text-5xl font-bold text-white mb-3">{t.heroTitle}</h1>
-              <p className="text-gray-300 mb-8 font-light text-lg">{t.heroSubtitle}</p>
-              
-              {/* Integrated Search Input */}
-              <div className="bg-white dark:bg-gray-800 p-2 rounded-full shadow-2xl flex items-center transition-all duration-300 focus-within:scale-105 ring-4 ring-transparent focus-within:ring-primary/20">
-                <div className="pl-4 pr-2 text-gray-400">
-                  <span className="material-icons-round">search</span>
+          {/* Trending Slider */}
+          <div className="mb-12 relative rounded-3xl overflow-hidden h-80 bg-gradient-to-br from-gray-900 to-gray-800 shadow-xl">
+            <div className="relative h-full">
+              {/* Slider Content */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-full max-w-5xl px-8">
+                  <div className="grid md:grid-cols-2 gap-8 items-center">
+                    {/* Left: Campaign Info */}
+                    <div className="text-white space-y-4">
+                      <div className="inline-flex items-center gap-2 bg-primary/20 backdrop-blur-sm px-4 py-2 rounded-full border border-primary/30">
+                        <span className="material-icons-round text-sm text-primary">campaign</span>
+                        <span className="text-sm font-bold text-primary">이달의 캠페인</span>
+                      </div>
+                      <h2 className="text-4xl md:text-5xl font-bold leading-tight">
+                        제주 바다를 지키는
+                        <br />
+                        <span className="text-primary">업사이클링 챌린지</span>
+                      </h2>
+                      <p className="text-gray-300 text-lg">
+                        해양 폐기물을 활용한 창작물을 만들고 공유해보세요. 우수작에게는 특별한 혜택이 제공됩니다.
+                      </p>
+                      <div className="flex items-center gap-4 pt-2">
+                        <button className="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/30 hover:scale-105">
+                          참여하기
+                        </button>
+                        <button className="px-6 py-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm text-white rounded-xl font-bold transition-all border border-white/20">
+                          자세히 보기
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Right: Featured Projects */}
+                    <div className="hidden md:grid grid-cols-2 gap-4">
+                      <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all cursor-pointer group">
+                        <div className="aspect-square bg-gradient-to-br from-blue-400 to-purple-500 rounded-xl mb-3 overflow-hidden">
+                          <img src="https://images.unsplash.com/photo-1618477461853-cf6ed80faba5?auto=format&fit=crop&w=400&q=80" alt="Project" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                        </div>
+                        <h4 className="text-white font-bold text-sm mb-1">해양 폐플라스틱 조명</h4>
+                        <p className="text-gray-400 text-xs">by EcoMaker</p>
+                      </div>
+                      <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all cursor-pointer group mt-8">
+                        <div className="aspect-square bg-gradient-to-br from-green-400 to-teal-500 rounded-xl mb-3 overflow-hidden">
+                          <img src="https://images.unsplash.com/photo-1610701596007-11502861dcfa?auto=format&fit=crop&w=400&q=80" alt="Project" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                        </div>
+                        <h4 className="text-white font-bold text-sm mb-1">폐어망 바구니</h4>
+                        <p className="text-gray-400 text-xs">by SeaCraft</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <input 
-                  type="text" 
-                  placeholder={t.heroPlaceholder}
-                  className="flex-1 bg-transparent border-none focus:ring-0 text-gray-800 dark:text-white placeholder-gray-400 text-base" 
-                />
-                <button className="bg-primary hover:bg-primary-dark text-white rounded-full p-3 transition-colors shadow-lg shadow-primary/30">
-                  <span className="material-icons-round block">arrow_forward</span>
-                </button>
               </div>
 
+              {/* Navigation Dots */}
+              <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-2">
+                <button className="w-2 h-2 rounded-full bg-primary"></button>
+                <button className="w-2 h-2 rounded-full bg-white/30 hover:bg-white/50 transition-colors"></button>
+                <button className="w-2 h-2 rounded-full bg-white/30 hover:bg-white/50 transition-colors"></button>
+              </div>
             </div>
           </div>
 
-          {/* Filters */}
+          {/* Filters - Dynamic Material Categories */}
           <div className="flex items-center justify-between mb-8 overflow-x-auto pb-2 scrollbar-hide">
             <div className="flex gap-3">
-              <button className="px-6 py-2.5 bg-gray-900 dark:bg-white dark:text-gray-900 text-white rounded-full text-sm font-medium whitespace-nowrap shadow-md">{t.allProjects}</button>
-              <button className="px-6 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-full text-sm font-medium whitespace-nowrap transition-colors">{t.beginner}</button>
-              <button className="px-6 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-full text-sm font-medium whitespace-nowrap transition-colors">{t.woodworking}</button>
-              <button className="px-6 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-full text-sm font-medium whitespace-nowrap transition-colors">{t.printing3d}</button>
+              {/* All Projects Button */}
+              <button
+                onClick={() => setSelectedCategory('all')}
+                className={`px-6 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 ${selectedCategory === 'all'
+                  ? 'bg-gray-900 dark:bg-white dark:text-gray-900 text-white shadow-md'
+                  : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
+              >
+                <span className="material-icons-round text-sm">apps</span>
+                {t.allProjects}
+              </button>
+
+              {/* Dynamic Material Categories */}
+              {materialCategories.map((material) => (
+                <button
+                  key={material}
+                  onClick={() => setSelectedCategory(material)}
+                  className={`px-6 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 ${selectedCategory === material
+                    ? 'bg-gray-900 dark:bg-white dark:text-gray-900 text-white shadow-md'
+                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                >
+                  <span className="material-icons-round text-sm">{getMaterialIcon(material)}</span>
+                  {material}
+                </button>
+              ))}
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 ml-4 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-100 dark:border-gray-700 shadow-sm">
               <span>{t.sortBy}</span>
@@ -313,47 +481,66 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
 
           {/* Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 pb-12">
-            {projects.map((project) => (
-              <div 
-                key={project.id} 
+            {filteredProjects.map((project) => (
+              <div
+                key={project.id}
                 className="group flex flex-col gap-3 cursor-pointer"
                 onClick={() => onProjectSelect(project)}
               >
                 <div className="relative aspect-[4/3] rounded-3xl overflow-hidden bg-gray-100 dark:bg-gray-800 shadow-sm group-hover:shadow-xl transition-all duration-300">
                   <img src={project.image} alt={project.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                  
+
                   {(project.isAiRemix || project.isAiIdea) && (
                     <div className="absolute top-3 right-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs font-bold text-primary flex items-center gap-1 shadow-sm border border-white/50 dark:border-gray-700">
-                      <span className="material-icons-round text-sm">auto_awesome</span> 
+                      <span className="material-icons-round text-sm">auto_awesome</span>
                       {project.isAiRemix ? (language === 'ko' ? 'AI 리믹스' : 'AI Remix') : (language === 'ko' ? 'AI 아이디어' : 'AI Idea')}
                     </div>
                   )}
 
-                  <button className="absolute bottom-3 right-3 w-10 h-10 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 shadow-md translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
-                    <span className="material-icons-round">favorite</span>
+                  <button
+                    className={`absolute bottom-3 right-3 w-10 h-10 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-md transition-all duration-300 ${likedProjects.has(project.id)
+                        ? 'text-red-500 translate-y-0 opacity-100'
+                        : 'text-gray-400 hover:text-red-500 translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100'
+                      }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onLikeToggle(project.id);
+                    }}
+                  >
+                    <span className="material-icons-round">{likedProjects.has(project.id) ? 'favorite' : 'favorite_border'}</span>
                   </button>
 
-                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors duration-300"></div>
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors duration-300"></div>
                 </div>
 
                 <div className="px-1">
                   <div className="flex justify-between items-start mb-1">
                     <h3 className="font-bold text-lg text-gray-900 dark:text-gray-100 leading-snug group-hover:text-primary transition-colors">{project.title}</h3>
                     <span className={`text-xs px-2.5 py-1 rounded-md font-medium border
-                      ${project.difficulty === 'Easy' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-100 dark:border-green-800' : 
-                        project.difficulty === 'Medium' ? 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 border-yellow-100 dark:border-yellow-800' : 
-                        'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-100 dark:border-red-800'}`}>
+                      ${project.difficulty === 'Easy' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-100 dark:border-green-800' :
+                        project.difficulty === 'Medium' ? 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 border-yellow-100 dark:border-yellow-800' :
+                          'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-100 dark:border-red-800'}`}>
                       {t.difficulty[project.difficulty]}
                     </span>
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">By <span className="text-gray-900 dark:text-gray-200 font-medium hover:underline">{project.maker}</span></p>
-                  <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400 font-medium">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400 font-medium">
                     <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
                       <span className="material-icons-round text-sm text-gray-400">category</span> {project.category}
                     </div>
                     <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
                       <span className="material-icons-round text-sm text-gray-400">schedule</span> {project.time}
                     </div>
+                    {(project.views || 0) > 0 && (
+                      <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                        <span className="material-icons-round text-sm text-gray-400">visibility</span> {(project.views || 0).toLocaleString()}
+                      </div>
+                    )}
+                    {(project.likes || 0) > 0 && (
+                      <div className={`flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded ${likedProjects.has(project.id) ? 'text-red-500' : ''}`}>
+                        <span className={`material-icons-round text-sm ${likedProjects.has(project.id) ? 'text-red-500' : 'text-gray-400'}`}>favorite</span> {(project.likes || 0).toLocaleString()}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -367,6 +554,17 @@ const Discovery: React.FC<DiscoveryProps> = ({ onNavigate, onProjectSelect, isDa
           </div>
         </main>
       </div>
+
+      {/* Wizard Modal */}
+      <WizardModal
+        isOpen={showWizard}
+        onClose={() => setShowWizard(false)}
+        language={language}
+        userTokens={userTokens}
+        setUserTokens={setUserTokens}
+        onAddProject={onAddProject}
+        user={user}
+      />
     </div>
   );
 };

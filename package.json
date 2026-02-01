@@ -9,11 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.454.0",
+    "@supabase/supabase-js": "2.39.3",
+    "@types/three": "^0.182.0",
+    "lucide-react": "^0.563.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "lucide-react": "^0.563.0",
-    "@aws-sdk/client-s3": "3.454.0",
-    "@supabase/supabase-js": "2.39.3"
+    "three": "^0.182.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  UploadCloud, 
-  Save, 
-  Image as ImageIcon, 
+import {
+  UploadCloud,
+  Save,
+  Image as ImageIcon,
   Loader2,
   HardDrive,
   Settings,
@@ -21,15 +21,14 @@ import {
   Trash2,
   AlertTriangle
 } from 'lucide-react';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { Project } from '../types';
 import { Language } from '../App';
 
 // --- Cloudflare R2 Configuration ---
 // 주의: 실제 프로덕션 환경에서는 이 키들을 환경변수(.env)로 관리하거나 
 // 서버(Supabase Edge Function)에서 서명된 URL을 생성하여 사용하는 것이 보안상 안전합니다.
-const R2_ACCOUNT_ID = '170a312dca9dcb4790b82ea3f0bd3034'; 
+const R2_ACCOUNT_ID = '170a312dca9dcb4790b82ea3f0bd3034';
 const R2_ACCESS_KEY_ID = '4e8c26d0b1a2d706fe96aa470704dc18';
 const R2_SECRET_ACCESS_KEY = '9e35d5139ae68e1f9fc305d8268494f8ab47755ca244b0369a0040e82c754f23';
 const R2_BUCKET_NAME = 'jeju-remaker-assets';
@@ -37,13 +36,14 @@ const R2_BUCKET_NAME = 'jeju-remaker-assets';
 const R2_PUBLIC_DOMAIN = 'https://pub-b7d22eda2a2840a99f84fad5136127e0.r2.dev';
 
 // Max file size: 10MB
-const MAX_FILE_SIZE = 10 * 1024 * 1024; 
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 interface AdminUploadProps {
   supabase: SupabaseClient;
   onBack: () => void;
   onUploadComplete: (project: Project) => void;
   language: Language;
+  user: any;
 }
 
 const TRANSLATIONS = {
@@ -179,14 +179,14 @@ const TRANSLATIONS = {
   }
 };
 
-const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadComplete, language }) => {
+const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadComplete, language, user }) => {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'inventory'
   const [inventory, setInventory] = useState([]);
-  
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState('');
-  
+
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+
   // R2 File State - Changed to array for multiple files
   const [modelFiles, setModelFiles] = useState<File[]>([]);
   const [isR2Configured, setIsR2Configured] = useState(false);
@@ -209,10 +209,10 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   // Check R2 Configuration on mount
   useEffect(() => {
-      // Cast to string to prevent TS narrowing to "never" due to const check
-      if ((R2_ACCOUNT_ID as string) !== 'YOUR_R2_ACCOUNT_ID' && !(R2_ACCOUNT_ID as string).includes('YOUR_')) {
-          setIsR2Configured(true);
-      }
+    // Cast to string to prevent TS narrowing to "never" due to const check
+    if ((R2_ACCOUNT_ID as string) !== 'YOUR_R2_ACCOUNT_ID' && !(R2_ACCOUNT_ID as string).includes('YOUR_')) {
+      setIsR2Configured(true);
+    }
   }, []);
 
   // --- Inventory Data Fetching & Bucket Check ---
@@ -222,9 +222,9 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         .from('items')
         .select('*')
         .order('created_at', { ascending: false });
-        
+
       if (error) throw error;
-      
+
       if (data) {
         setInventory(data);
       }
@@ -236,22 +236,22 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   useEffect(() => {
     // Attempt to initialize storage bucket if it doesn't exist
     const ensureBucket = async () => {
-        try {
-            const { data: buckets } = await supabase.storage.listBuckets();
-            // If we can list buckets and 'item-images' is missing, try to create it
-            if (buckets && !buckets.find(b => b.name === 'item-images')) {
-                const { error } = await supabase.storage.createBucket('item-images', { 
-                    public: true,
-                    fileSizeLimit: 5242880, // 5MB
-                    allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-                });
-                if (error) console.warn("Auto-bucket creation failed (likely permissions):", error.message);
-                else console.log("Created 'item-images' bucket successfully.");
-            }
-        } catch (e) {
-            // Silently fail if listing/creating is restricted (common for anon keys)
-            console.debug("Storage initialization skipped (permissions)");
+      try {
+        const { data: buckets } = await supabase.storage.listBuckets();
+        // If we can list buckets and 'item-images' is missing, try to create it
+        if (buckets && !buckets.find(b => b.name === 'item-images')) {
+          const { error } = await supabase.storage.createBucket('item-images', {
+            public: true,
+            fileSizeLimit: 5242880, // 5MB
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+          });
+          if (error) console.warn("Auto-bucket creation failed (likely permissions):", error.message);
+          else console.log("Created 'item-images' bucket successfully.");
         }
+      } catch (e) {
+        // Silently fail if listing/creating is restricted (common for anon keys)
+        console.debug("Storage initialization skipped (permissions)");
+      }
     };
     ensureBucket();
 
@@ -281,24 +281,30 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   // --- Handlers ---
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setImageFiles(prev => [...prev, ...newFiles]);
+      const newUrls = newFiles.map(file => URL.createObjectURL(file));
+      setPreviewUrls(prev => [...prev, ...newUrls]);
     }
+  };
+
+  const removeImage = (index: number) => {
+    setImageFiles(prev => prev.filter((_, i) => i !== index));
+    setPreviewUrls(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleModelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files);
-      
+
       // Validate file size (10MB)
       const validFiles = newFiles.filter(file => {
-          if (file.size > MAX_FILE_SIZE) {
-              alert(`${t.alert.sizeError} (${file.name})`);
-              return false;
-          }
-          return true;
+        if (file.size > MAX_FILE_SIZE) {
+          alert(`${t.alert.sizeError} (${file.name})`);
+          return false;
+        }
+        return true;
       });
 
       setModelFiles(prev => [...prev, ...validFiles]);
@@ -312,40 +318,137 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   const uploadToR2 = async (file: File) => {
     // If keys are not set, return a mock URL for testing
     if (!isR2Configured) {
-       console.warn("R2 not configured. Returning mock URL for:", file.name);
-       // Simulate upload delay
-       await new Promise(resolve => setTimeout(resolve, 1000));
-       return `https://mock-r2-bucket.com/${file.name}`;
+      console.warn("R2 not configured. Returning mock URL for:", file.name);
+      // Simulate upload delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return `https://mock-r2-bucket.com/${file.name}`;
     }
-
-    const S3 = new S3Client({
-      region: "auto",
-      endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: R2_ACCESS_KEY_ID,
-        secretAccessKey: R2_SECRET_ACCESS_KEY,
-      },
-    });
 
     // Simple key generation - in production avoid special chars in filenames
     const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const key = `models/${Date.now()}_${safeName}`;
-    
-    try {
-      // Convert File to Uint8Array to avoid browser/node stream ambiguity which causes 'fs.readFile' errors
-      const arrayBuffer = await file.arrayBuffer();
-      const fileBuffer = new Uint8Array(arrayBuffer);
 
-      await S3.send(new PutObjectCommand({
-          Bucket: R2_BUCKET_NAME,
-          Key: key,
-          Body: fileBuffer,
-          ContentType: file.type || 'application/octet-stream', 
-          ContentLength: file.size
-      }));
-      
+    try {
+      // Use XMLHttpRequest for direct upload to R2 with signed request
+      // This avoids the AWS SDK fs.readFile issue in browsers
+      const endpoint = `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2_BUCKET_NAME}/${key}`;
+
+      // Create AWS Signature V4 for the request
+      const now = new Date();
+      const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+      const dateStamp = amzDate.slice(0, 8);
+      const region = 'auto';
+      const service = 's3';
+
+      // Create canonical request components
+      const method = 'PUT';
+      const contentType = file.type || 'application/octet-stream';
+
+      // For browser-based upload, use a simpler approach with public bucket
+      // or use a proxy/edge function. Here we'll try direct upload.
+
+      // Read file as ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+
+      // Create a simple hash for content (empty for unsigned payload)
+      const payloadHash = 'UNSIGNED-PAYLOAD';
+
+      // Build headers
+      const headers: Record<string, string> = {
+        'Content-Type': contentType,
+        'x-amz-date': amzDate,
+        'x-amz-content-sha256': payloadHash,
+      };
+
+      // Create canonical headers string
+      const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+      const host = `${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+      const canonicalHeaders =
+        `content-type:${contentType}\n` +
+        `host:${host}\n` +
+        `x-amz-content-sha256:${payloadHash}\n` +
+        `x-amz-date:${amzDate}\n`;
+
+      // Create canonical request
+      const canonicalUri = `/${R2_BUCKET_NAME}/${key}`;
+      const canonicalQueryString = '';
+      const canonicalRequest = [
+        method,
+        canonicalUri,
+        canonicalQueryString,
+        canonicalHeaders,
+        signedHeaders,
+        payloadHash
+      ].join('\n');
+
+      // Create string to sign
+      const algorithm = 'AWS4-HMAC-SHA256';
+      const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+
+      // Use Web Crypto API for HMAC-SHA256
+      const encoder = new TextEncoder();
+
+      const getSignatureKey = async (key: string, dateStamp: string, regionName: string, serviceName: string) => {
+        const kDate = await crypto.subtle.sign('HMAC',
+          await crypto.subtle.importKey('raw', encoder.encode('AWS4' + key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
+          encoder.encode(dateStamp)
+        );
+        const kRegion = await crypto.subtle.sign('HMAC',
+          await crypto.subtle.importKey('raw', kDate, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
+          encoder.encode(regionName)
+        );
+        const kService = await crypto.subtle.sign('HMAC',
+          await crypto.subtle.importKey('raw', kRegion, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
+          encoder.encode(serviceName)
+        );
+        const kSigning = await crypto.subtle.sign('HMAC',
+          await crypto.subtle.importKey('raw', kService, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
+          encoder.encode('aws4_request')
+        );
+        return kSigning;
+      };
+
+      // Hash the canonical request
+      const canonicalRequestHash = Array.from(
+        new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(canonicalRequest)))
+      ).map(b => b.toString(16).padStart(2, '0')).join('');
+
+      const stringToSign = [
+        algorithm,
+        amzDate,
+        credentialScope,
+        canonicalRequestHash
+      ].join('\n');
+
+      // Calculate signature
+      const signingKey = await getSignatureKey(R2_SECRET_ACCESS_KEY, dateStamp, region, service);
+      const signatureBytes = await crypto.subtle.sign('HMAC',
+        await crypto.subtle.importKey('raw', signingKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
+        encoder.encode(stringToSign)
+      );
+      const signature = Array.from(new Uint8Array(signatureBytes))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // Create authorization header
+      const authorization = `${algorithm} Credential=${R2_ACCESS_KEY_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+      // Make the request
+      const response = await fetch(`https://${host}${canonicalUri}`, {
+        method: 'PUT',
+        headers: {
+          ...headers,
+          'Authorization': authorization,
+          'Host': host,
+        },
+        body: arrayBuffer
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`R2 upload failed: ${response.status} - ${errorText}`);
+      }
+
       // Return the public URL
-      // Ensure R2_PUBLIC_DOMAIN does not have a trailing slash
       const domain = R2_PUBLIC_DOMAIN.endsWith('/') ? R2_PUBLIC_DOMAIN.slice(0, -1) : R2_PUBLIC_DOMAIN;
       return `${domain}/${key}`;
     } catch (err: any) {
@@ -353,63 +456,60 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
       // Alert explicit error to user
       alert(`${t.alert.r2UploadError} ${err.message}`);
       // Fallback to avoid breaking the app flow completely
-      return `https://upload-failed.com/${file.name}`; 
+      return `https://upload-failed.com/${file.name}`;
     }
   };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!imageFile) { alert(t.visuals.selectImage); return; }
+    if (imageFiles.length === 0) { alert(t.visuals.selectImage); return; }
 
     setLoading(true);
-    let finalImageUrl = '';
+    const uploadedImageUrls: string[] = [];
 
     try {
-      // 1. Upload Image to Supabase Storage with Safe Filename
-      const fileExt = imageFile.name.split('.').pop() || 'jpg';
-      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
-      
-      try {
-        const { data: imageData, error: imageError } = await supabase.storage
+      // 1. Upload ALL Images to Supabase Storage
+      for (const imageFile of imageFiles) {
+        const fileExt = imageFile.name.split('.').pop() || 'jpg';
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
+
+        try {
+          const { data: imageData, error: imageError } = await supabase.storage
             .from('item-images')
             .upload(fileName, imageFile);
 
-        if (imageError) throw imageError;
+          if (imageError) throw imageError;
 
-        const { data: publicUrlData } = supabase.storage
+          const { data: publicUrlData } = supabase.storage
             .from('item-images')
             .getPublicUrl(fileName);
-            
-        finalImageUrl = publicUrlData.publicUrl;
-      } catch (storageError: any) {
-        console.warn("Storage upload failed:", storageError.message);
-        
-        const errorMessage = storageError.message?.toLowerCase() || '';
-        
-        if (errorMessage.includes('row-level security') || errorMessage.includes('permission denied')) {
-            alert(`${t.alert.policyError}\n(Error: ${storageError.message})`);
-        } else {
-            alert(`${t.alert.bucketError}\n(Error: ${storageError.message})`);
+
+          uploadedImageUrls.push(publicUrlData.publicUrl);
+        } catch (storageError: any) {
+          console.warn(`Storage upload failed for ${imageFile.name}:`, storageError.message);
+
+          // Use fallback image for failed uploads
+          uploadedImageUrls.push('https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80');
         }
-        
-        finalImageUrl = 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80';
       }
+
+      const finalImageUrl = uploadedImageUrls[0] || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80';
 
       // 2. Upload Model Files to Cloudflare R2 (Multiple)
       const uploadedModels = [];
       if (modelFiles.length > 0) {
         if (!isR2Configured) {
-            alert(t.alert.r2ConfigError);
+          alert(t.alert.r2ConfigError);
         }
 
         for (const file of modelFiles) {
-            const url = await uploadToR2(file);
-            uploadedModels.push({
-                name: file.name,
-                size: file.size,
-                type: file.type,
-                url: url
-            });
+          const url = await uploadToR2(file);
+          uploadedModels.push({
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            url: url
+          });
         }
       }
 
@@ -427,10 +527,13 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
             required_tools: formData.tools,
             image_url: finalImageUrl,
             is_ai_generated: formData.isAI,
+            is_public: true, // Admin uploads are public by default
+            owner_id: user?.id, // Required for RLS policy
             metadata: {
               fabrication_guide: formData.steps,
               model_files: uploadedModels, // Store array of files
-              download_url: uploadedModels.length > 0 ? uploadedModels[0].url : '' // Fallback backward compatibility
+              download_url: uploadedModels.length > 0 ? uploadedModels[0].url : '', // Fallback backward compatibility
+              images: uploadedImageUrls // 모든 이미지 URL
             }
           }
         ])
@@ -439,23 +542,25 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
       if (insertError) throw insertError;
 
       alert(t.alert.success);
-      
+
       const newProject: Project = {
         id: Date.now().toString(),
         title: formData.title,
         maker: 'Master Kim',
         image: finalImageUrl,
+        images: uploadedImageUrls, // 모든 이미지 URL
         category: formData.category,
         time: formData.time || '2h',
         difficulty: formData.difficulty as 'Easy' | 'Medium' | 'Hard',
         isAiRemix: formData.isAI,
         description: `Project: ${formData.title}. Material: ${formData.material}`,
         steps: formData.steps,
-        downloadUrl: uploadedModels.length > 0 ? uploadedModels[0].url : ''
+        downloadUrl: uploadedModels.length > 0 ? uploadedModels[0].url : '',
+        modelFiles: uploadedModels
       };
-      
+
       onUploadComplete(newProject);
-      
+
     } catch (error: any) {
       alert(`${t.alert.error}${error.message}`);
       console.error(error);
@@ -466,7 +571,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   return (
     <div className="flex h-screen w-full bg-[#f6f8f7] text-slate-900 font-sans selection:bg-[#10b77f] selection:text-white overflow-hidden">
-      
+
       {/* Sidebar - Design preserved */}
       <aside className="w-20 lg:w-72 flex-shrink-0 flex flex-col justify-between bg-[#0d1b17] border-r border-white/5 h-full transition-all duration-300">
         <div className="flex flex-col gap-8 p-6">
@@ -477,14 +582,14 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
             <h1 className="text-white text-lg font-bold tracking-tight hidden lg:block">Jeju Re-Maker</h1>
           </div>
           <nav className="flex flex-col gap-2">
-            <button 
+            <button
               onClick={() => setActiveTab('upload')}
               className={`flex items-center gap-3 px-4 py-3 rounded-full transition-all group ${activeTab === 'upload' ? 'bg-[#10b77f] text-white shadow-[0_0_15px_rgba(16,183,127,0.3)]' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             >
               <UploadCloud className="w-5 h-5" />
               <p className="text-sm font-medium hidden lg:block">{t.sidebar.upload}</p>
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('inventory')}
               className={`flex items-center gap-3 px-4 py-3 rounded-full transition-all group ${activeTab === 'inventory' ? 'bg-[#10b77f] text-white shadow-[0_0_15px_rgba(16,183,127,0.3)]' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             >
@@ -528,7 +633,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
           {activeTab === 'upload' && (
             <div className="flex gap-3">
               <button className="px-6 py-2.5 rounded-full text-slate-600 font-medium text-sm hover:bg-slate-100 transition-colors">{t.header.saveDraft}</button>
-              <button 
+              <button
                 onClick={handleUpload}
                 disabled={loading}
                 className="px-6 py-2.5 rounded-full bg-[#10b77f] text-white font-medium text-sm shadow-lg shadow-[#10b77f]/30 hover:shadow-[#10b77f]/50 hover:-translate-y-0.5 transition-all flex items-center gap-2 disabled:opacity-50"
@@ -552,21 +657,21 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                 <div className="bg-white p-8 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100 flex flex-col gap-6">
                   <div className="flex flex-col gap-2">
                     <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.projectTitle}</label>
-                    <input 
+                    <input
                       value={formData.title}
-                      onChange={(e) => setFormData({...formData, title: e.target.value})}
-                      className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all placeholder:text-slate-400 font-medium outline-none" 
+                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                      className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all placeholder:text-slate-400 font-medium outline-none"
                       placeholder={t.basicInfo.projectTitlePlaceholder}
-                      type="text" 
+                      type="text"
                     />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="flex flex-col gap-2">
                       <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.material}</label>
                       <div className="relative">
-                        <select 
+                        <select
                           value={formData.material}
-                          onChange={(e) => setFormData({...formData, material: e.target.value})}
+                          onChange={(e) => setFormData({ ...formData, material: e.target.value })}
                           className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 appearance-none focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all font-medium outline-none"
                         >
                           <option>Old Denim Jeans</option>
@@ -582,42 +687,42 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                     <div className="flex flex-col gap-2">
                       <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.time}</label>
                       <div className="relative">
-                        <input 
+                        <input
                           value={formData.time}
-                          onChange={(e) => setFormData({...formData, time: e.target.value})}
-                          className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all placeholder:text-slate-400 font-medium outline-none" 
+                          onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                          className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all placeholder:text-slate-400 font-medium outline-none"
                           placeholder={t.basicInfo.timePlaceholder}
-                          type="text" 
+                          type="text"
                         />
                         <Clock className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-slate-400" />
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                     <div className="flex flex-col gap-2">
-                        <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.category}</label>
-                        <div className="relative">
-                          <select 
-                            value={formData.category}
-                            onChange={(e) => setFormData({...formData, category: e.target.value})}
-                            className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 appearance-none focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all font-medium outline-none"
-                          >
-                            {['Furniture', 'Home Decor', 'Kitchen', 'Fashion', 'Art'].map(cat => <option key={cat}>{cat}</option>)}
-                          </select>
-                          <ChevronRight className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
-                        </div>
-                     </div>
-                     <div className="flex flex-col gap-2">
-                        <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.tools}</label>
-                        <input 
-                          value={formData.tools}
-                          onChange={(e) => setFormData({...formData, tools: e.target.value})}
-                          className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all placeholder:text-slate-400 font-medium outline-none" 
-                          placeholder={t.basicInfo.toolsPlaceholder} 
-                          type="text" 
-                        />
-                     </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.category}</label>
+                      <div className="relative">
+                        <select
+                          value={formData.category}
+                          onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                          className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 appearance-none focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all font-medium outline-none"
+                        >
+                          {['Furniture', 'Home Decor', 'Kitchen', 'Fashion', 'Art'].map(cat => <option key={cat}>{cat}</option>)}
+                        </select>
+                        <ChevronRight className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.tools}</label>
+                      <input
+                        value={formData.tools}
+                        onChange={(e) => setFormData({ ...formData, tools: e.target.value })}
+                        className="w-full bg-slate-50 border-0 text-slate-900 rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white transition-all placeholder:text-slate-400 font-medium outline-none"
+                        placeholder={t.basicInfo.toolsPlaceholder}
+                        type="text"
+                      />
+                    </div>
                   </div>
 
                   {/* R2 Upload Section (Multiple Files) */}
@@ -627,68 +732,68 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                       {t.basicInfo.modelFile}
                     </label>
                     <div className="relative group">
-                        <input 
-                          type="file"
-                          multiple // Enable multiple files
-                          accept=".stl,.obj,.glb,.gltf,.dxf,.dwg,.pdf,.svg,.ai,.png"
-                          onChange={handleModelChange}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        />
-                        <div className={`w-full bg-slate-50 border-2 border-dashed ${modelFiles.length > 0 ? 'border-[#10b77f] bg-[#10b77f]/5' : 'border-slate-200'} rounded-2xl px-6 py-8 flex flex-col items-center justify-center text-center transition-all group-hover:border-[#10b77f]/50 group-hover:bg-slate-100`}>
-                            {modelFiles.length > 0 ? (
-                                <div className="w-full flex flex-col gap-2">
-                                    <div className="flex items-center justify-center gap-2 text-[#10b77f] mb-2">
-                                         <FileBox className="w-6 h-6" />
-                                         <span className="font-bold">{modelFiles.length} files selected</span>
+                      <input
+                        type="file"
+                        multiple // Enable multiple files
+                        accept=".stl,.obj,.glb,.gltf,.dxf,.dwg,.pdf,.svg,.ai,.png"
+                        onChange={handleModelChange}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                      />
+                      <div className={`w-full bg-slate-50 border-2 border-dashed ${modelFiles.length > 0 ? 'border-[#10b77f] bg-[#10b77f]/5' : 'border-slate-200'} rounded-2xl px-6 py-8 flex flex-col items-center justify-center text-center transition-all group-hover:border-[#10b77f]/50 group-hover:bg-slate-100`}>
+                        {modelFiles.length > 0 ? (
+                          <div className="w-full flex flex-col gap-2">
+                            <div className="flex items-center justify-center gap-2 text-[#10b77f] mb-2">
+                              <FileBox className="w-6 h-6" />
+                              <span className="font-bold">{modelFiles.length} files selected</span>
+                            </div>
+                            <div className="grid gap-2 max-h-48 overflow-y-auto w-full px-2 z-20">
+                              {modelFiles.map((file, idx) => (
+                                <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-[#10b77f]/20 shadow-sm relative z-20">
+                                  <div className="flex items-center gap-3 overflow-hidden">
+                                    <div className="bg-[#10b77f]/10 p-1.5 rounded-lg">
+                                      <FileBox className="w-4 h-4 text-[#10b77f]" />
                                     </div>
-                                    <div className="grid gap-2 max-h-48 overflow-y-auto w-full px-2 z-20">
-                                        {modelFiles.map((file: File, idx) => (
-                                            <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-[#10b77f]/20 shadow-sm relative z-20">
-                                                <div className="flex items-center gap-3 overflow-hidden">
-                                                    <div className="bg-[#10b77f]/10 p-1.5 rounded-lg">
-                                                        <FileBox className="w-4 h-4 text-[#10b77f]" />
-                                                    </div>
-                                                    <div className="flex flex-col items-start min-w-0">
-                                                        <span className="font-medium text-sm truncate w-full text-slate-700">{file.name}</span>
-                                                        <span className="text-[10px] text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                                                    </div>
-                                                </div>
-                                                <button 
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation(); // Stop click from triggering file input
-                                                        removeModelFile(idx);
-                                                    }}
-                                                    className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors z-30"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        ))}
+                                    <div className="flex flex-col items-start min-w-0">
+                                      <span className="font-medium text-sm truncate w-full text-slate-700">{file.name}</span>
+                                      <span className="text-[10px] text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
                                     </div>
-                                    <p className="text-slate-400 text-xs mt-2">Click area to add more files</p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation(); // Stop click from triggering file input
+                                      removeModelFile(idx);
+                                    }}
+                                    className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors z-30"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 </div>
-                            ) : (
-                                <>
-                                    <UploadCloud className="w-8 h-8 text-slate-400 mb-2 group-hover:scale-110 transition-transform" />
-                                    <p className="text-slate-600 font-medium">{t.basicInfo.modelDragDrop}</p>
-                                    <p className="text-slate-400 text-xs mt-1">{t.basicInfo.modelFormats}</p>
-                                </>
-                            )}
-                        </div>
+                              ))}
+                            </div>
+                            <p className="text-slate-400 text-xs mt-2">Click area to add more files</p>
+                          </div>
+                        ) : (
+                          <>
+                            <UploadCloud className="w-8 h-8 text-slate-400 mb-2 group-hover:scale-110 transition-transform" />
+                            <p className="text-slate-600 font-medium">{t.basicInfo.modelDragDrop}</p>
+                            <p className="text-slate-400 text-xs mt-1">{t.basicInfo.modelFormats}</p>
+                          </>
+                        )}
+                      </div>
                     </div>
                     {/* R2 Warning Alert */}
                     {!isR2Configured && (
-                        <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-amber-700 text-sm">
-                            <AlertTriangle className="w-5 h-5 shrink-0" />
-                            <div>
-                                <p className="font-bold">R2 Key Configuration Needed</p>
-                                <p className="text-xs mt-1 text-amber-600">
-                                    To enable real file uploads, you must set your Cloudflare R2 Account ID, Access Key, and Secret Key in <code>components/AdminUpload.tsx</code>. Currently using mock uploads.
-                                </p>
-                            </div>
+                      <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-amber-700 text-sm">
+                        <AlertTriangle className="w-5 h-5 shrink-0" />
+                        <div>
+                          <p className="font-bold">R2 Key Configuration Needed</p>
+                          <p className="text-xs mt-1 text-amber-600">
+                            To enable real file uploads, you must set your Cloudflare R2 Account ID, Access Key, and Secret Key in <code>components/AdminUpload.tsx</code>. Currently using mock uploads.
+                          </p>
                         </div>
+                      </div>
                     )}
                   </div>
 
@@ -696,10 +801,10 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                     <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.difficulty}</label>
                     <div className="flex p-1 bg-slate-100 rounded-full w-fit">
                       {['Easy', 'Intermediate', 'Advanced'].map((level) => (
-                        <button 
+                        <button
                           key={level}
                           type="button"
-                          onClick={() => setFormData({...formData, difficulty: level})}
+                          onClick={() => setFormData({ ...formData, difficulty: level })}
                           className={`px-6 py-2 rounded-full text-sm font-semibold transition-all ${formData.difficulty === level ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                           {t.basicInfo.diffLevels[level as 'Easy' | 'Intermediate' | 'Advanced'] || level}
@@ -723,7 +828,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                   {formData.steps.map((step, index) => (
                     <div key={index} className="group bg-white p-6 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100 relative hover:border-[#10b77f]/30 transition-colors">
                       <div className="absolute left-6 top-6 bg-slate-100 text-slate-600 size-8 rounded-full flex items-center justify-center font-bold text-sm">{index + 1}</div>
-                      
+
                       {formData.steps.length > 1 && (
                         <button onClick={() => removeStep(index)} className="absolute right-6 top-6 text-slate-300 hover:text-rose-500 transition-colors">
                           <X className="w-5 h-5" />
@@ -731,17 +836,17 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                       )}
 
                       <div className="pl-12 flex flex-col gap-4">
-                        <input 
+                        <input
                           value={step.title}
                           onChange={(e) => updateStep(index, 'title', e.target.value)}
-                          className="w-full bg-transparent border-0 border-b border-gray-200 text-slate-900 px-0 py-2 focus:ring-0 focus:border-[#10b77f] text-lg font-semibold placeholder:text-slate-300 transition-colors" 
-                          placeholder={t.steps.stepTitle} 
-                          type="text" 
+                          className="w-full bg-transparent border-0 border-b border-gray-200 text-slate-900 px-0 py-2 focus:ring-0 focus:border-[#10b77f] text-lg font-semibold placeholder:text-slate-300 transition-colors"
+                          placeholder={t.steps.stepTitle}
+                          type="text"
                         />
-                        <textarea 
+                        <textarea
                           value={step.desc}
                           onChange={(e) => updateStep(index, 'desc', e.target.value)}
-                          className="w-full bg-slate-50 border-0 text-slate-600 rounded-2xl px-4 py-3 focus:ring-2 focus:ring-[#10b77f]/20 transition-all resize-none text-sm leading-relaxed" 
+                          className="w-full bg-slate-50 border-0 text-slate-600 rounded-2xl px-4 py-3 focus:ring-2 focus:ring-[#10b77f]/20 transition-all resize-none text-sm leading-relaxed"
                           placeholder={t.steps.descPlaceholder}
                           rows={3}
                         ></textarea>
@@ -749,20 +854,20 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                           <Lightbulb className="text-yellow-500 w-5 h-5 mt-0.5" />
                           <div className="flex-1">
                             <p className="text-xs font-bold text-yellow-700 uppercase mb-1">{t.steps.expertTip}</p>
-                            <input 
+                            <input
                               value={step.tip}
                               onChange={(e) => updateStep(index, 'tip', e.target.value)}
-                              className="w-full bg-transparent border-0 p-0 text-sm text-yellow-900 placeholder:text-yellow-900/40 focus:ring-0" 
+                              className="w-full bg-transparent border-0 p-0 text-sm text-yellow-900 placeholder:text-yellow-900/40 focus:ring-0"
                               placeholder={t.steps.tipPlaceholder}
-                              type="text" 
+                              type="text"
                             />
                           </div>
                         </div>
                       </div>
                     </div>
                   ))}
-                  
-                  <button 
+
+                  <button
                     onClick={addStep}
                     className="w-full py-4 rounded-[2rem] border-2 border-dashed border-slate-200 text-slate-400 hover:border-[#10b77f] hover:text-[#10b77f] hover:bg-[#10b77f]/5 transition-all flex items-center justify-center gap-2 group"
                   >
@@ -779,10 +884,23 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                   <h3 className="text-lg font-bold text-slate-800">{t.visuals.title}</h3>
                 </div>
                 <div className="bg-white p-8 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100">
-                  <div className="w-full h-64 rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-100 hover:border-[#10b77f]/50 transition-all group relative overflow-hidden">
-                    <input className="absolute inset-0 opacity-0 cursor-pointer z-10" type="file" accept="image/*" onChange={handleImageChange} />
-                    {previewUrl ? (
-                      <img src={previewUrl} className="w-full h-full object-cover rounded-2xl" alt="Preview" />
+                  <div className="w-full min-h-64 rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-100 hover:border-[#10b77f]/50 transition-all group relative overflow-hidden">
+                    <input className="absolute inset-0 opacity-0 cursor-pointer z-10" type="file" accept="image/*" multiple onChange={handleImageChange} />
+                    {previewUrls.length > 0 ? (
+                      <div className="w-full p-4 grid grid-cols-2 gap-4">
+                        {previewUrls.map((url, index) => (
+                          <div key={index} className="relative group/img">
+                            <img src={url} className="w-full h-40 object-cover rounded-2xl" alt={`Preview ${index + 1}`} />
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); removeImage(index); }}
+                              className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
+                            >
+                              <span className="material-icons-round text-sm">close</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     ) : (
                       <>
                         <div className="bg-white p-4 rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform duration-300">
@@ -818,7 +936,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                 </div>
               )) : (
                 <div className="col-span-full py-20 text-center">
-                   <p className="text-slate-400 font-medium">{t.inventory.noItems}</p>
+                  <p className="text-slate-400 font-medium">{t.inventory.noItems}</p>
                 </div>
               )}
             </div>
