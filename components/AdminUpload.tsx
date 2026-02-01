@@ -200,7 +200,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     difficulty: 'Intermediate',
     co2: '1.2',
     time: '',
-    isAI: true,
+    isAI: false,
     tools: '',
     steps: [
       { title: '', desc: '', tip: '' }
@@ -797,19 +797,49 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                     )}
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.difficulty}</label>
-                    <div className="flex p-1 bg-slate-100 rounded-full w-fit">
-                      {['Easy', 'Intermediate', 'Advanced'].map((level) => (
+                  <div className="flex flex-col gap-4 mt-6 border-t border-slate-50 pt-6">
+                    <label className="text-slate-700 text-sm font-semibold ml-2 flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-[#10b77f]" />
+                      Project Settings
+                    </label>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* AI Toggle */}
+                      <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-gray-100">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-xl transition-colors ${formData.isAI ? 'bg-primary/20 text-primary' : 'bg-gray-200 text-gray-500'}`}>
+                            <span className="material-icons-round text-sm">auto_awesome</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{language === 'ko' ? 'AI 생성물' : 'AI Generated'}</p>
+                            <p className="text-[10px] text-slate-500">{language === 'ko' ? 'AI 리믹스 또는 아이디어로 표시됩니다' : 'Marked as AI Remix or Idea'}</p>
+                          </div>
+                        </div>
                         <button
-                          key={level}
                           type="button"
-                          onClick={() => setFormData({ ...formData, difficulty: level })}
-                          className={`px-6 py-2 rounded-full text-sm font-semibold transition-all ${formData.difficulty === level ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                          onClick={() => setFormData({ ...formData, isAI: !formData.isAI })}
+                          className={`w-12 h-6 rounded-full transition-all relative ${formData.isAI ? 'bg-primary' : 'bg-gray-300'}`}
                         >
-                          {t.basicInfo.diffLevels[level as 'Easy' | 'Intermediate' | 'Advanced'] || level}
+                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.isAI ? 'right-1' : 'left-1'}`}></div>
                         </button>
-                      ))}
+                      </div>
+
+                      {/* Difficulty Selector */}
+                      <div className="flex flex-col gap-2">
+                        <label className="text-slate-700 text-[10px] font-bold uppercase tracking-wider ml-2">{t.basicInfo.difficulty}</label>
+                        <div className="flex p-1 bg-slate-100 rounded-full w-full">
+                          {['Easy', 'Intermediate', 'Advanced'].map((level) => (
+                            <button
+                              key={level}
+                              type="button"
+                              onClick={() => setFormData({ ...formData, difficulty: level })}
+                              className={`flex-1 py-2 rounded-full text-xs font-bold transition-all ${formData.difficulty === level ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                              {t.basicInfo.diffLevels[level as 'Easy' | 'Intermediate' | 'Advanced'] || level}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -942,8 +972,8 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
             </div>
           )}
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 };
 

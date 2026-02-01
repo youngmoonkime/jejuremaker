@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createClient, User } from '@supabase/supabase-js';
 import Discovery from './components/Discovery';
 import ProjectDetail from './components/ProjectDetail';
@@ -8,7 +8,8 @@ import Trending from './components/Trending';
 import Community from './components/Community';
 import AuthModal from './components/AuthModal';
 import Profile from './components/Profile';
-import { Project } from './types';
+import Layout from './components/Layout';
+import { Project, Maker } from './types';
 
 // Supabase Configuration
 const supabaseUrl = 'https://jbkfsvinitavzyflcuwg.supabase.co';
@@ -31,7 +32,7 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('discovery');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [language, setLanguage] = useState<Language>('ko');
-  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
   // Authentication & Token State
@@ -41,6 +42,51 @@ const App: React.FC = () => {
   const [authTargetView, setAuthTargetView] = useState<ViewState | null>(null);
   const [myProjects, setMyProjects] = useState<Project[]>([]); // User's private projects
   const [likedProjects, setLikedProjects] = useState<Set<string>>(new Set()); // Track liked projects
+
+  // Wizard Modal State (Global)
+  const [showWizard, setShowWizard] = useState(false);
+
+  // Calculate Top Makers dynamically (Global Logic)
+  const MAKERS = useMemo(() => {
+    const makerStats: Record<string, { projects: number; likes: number; views: number; avatar: string }> = {};
+
+    projects.forEach(p => {
+      const makerName = p.maker || 'Unknown Maker';
+      if (!makerStats[makerName]) {
+        makerStats[makerName] = {
+          projects: 0,
+          likes: 0,
+          views: 0,
+          // Use a consistent avatar for 'Master Kim', or a random one for others if not available
+          avatar: makerName === 'Master Kim'
+            ? 'https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs'
+            : 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'
+        };
+      }
+      makerStats[makerName].projects += 1;
+      makerStats[makerName].likes += (p.likes || 0);
+      makerStats[makerName].views += (p.views || 0);
+    });
+
+    const sortedMakers: Maker[] = Object.keys(makerStats)
+      .map(name => ({
+        name,
+        avatar: makerStats[name].avatar,
+        projects: makerStats[name].projects,
+        // Format likes (e.g., 1200 -> 1.2k)
+        likes: makerStats[name].likes >= 1000
+          ? (makerStats[name].likes / 1000).toFixed(1) + 'k'
+          : makerStats[name].likes.toString(),
+        // Raw likes for sorting
+        rawLikes: makerStats[name].likes,
+        rank: 0 // Will assign later
+      }))
+      .sort((a, b) => (b as any).rawLikes - (a as any).rawLikes) // Sort by Total Likes DESC
+      .slice(0, 5) // Top 5
+      .map((m, index) => ({ ...m, rank: index + 1 }));
+
+    return sortedMakers;
+  }, [projects]);
 
   // Apply dark mode class to html element
   useEffect(() => {
@@ -91,14 +137,14 @@ const App: React.FC = () => {
           const mappedProjects: Project[] = data.map((item: any) => ({
             id: item.id.toString(),
             title: item.title,
-            maker: 'Master Kim', // Default maker for new uploads
+            maker: item.metadata?.maker_name || 'Master Kim',
             image: item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80', // Fallback for missing images
             images: item.metadata?.images || [], // 여러 이미지 지원
             category: item.category,
             time: item.estimated_time || '2h',
             difficulty: (item.difficulty as 'Easy' | 'Medium' | 'Hard') || 'Medium',
             isAiRemix: item.is_ai_generated,
-            description: item.title + ' - Custom project', // Simplified fallback
+            description: item.metadata?.description || item.description || (item.title + ' - Custom project'),
             steps: item.metadata?.fabrication_guide || [],
             downloadUrl: item.metadata?.download_url || '', // Map the download link
             modelFiles: item.metadata?.model_files || [], // 여러 파일 지원
@@ -111,14 +157,47 @@ const App: React.FC = () => {
 
           // Filter only public projects for Discovery
           const publicProjects = mappedProjects.filter(p => p.isPublic !== false);
-          setProjects([...publicProjects, ...INITIAL_PROJECTS]);
+          setProjects(publicProjects);
         }
       } catch (error) {
         console.error("Failed to fetch projects:", error);
       }
     };
 
-    fetchProjects();
+    // Seed initial data and then fetch
+    const seedAndFetch = async () => {
+      const isSeeded = localStorage.getItem('jejuremaker_initial_seeded_v1');
+
+      if (!isSeeded) {
+        console.log('Seeding initial data...');
+        for (const p of INITIAL_PROJECTS) {
+          const { data } = await supabase.from('items').select('id').eq('title', p.title).maybeSingle();
+          if (!data) {
+            await supabase.from('items').insert({
+              title: p.title,
+              description: p.description || p.title,
+              image_url: p.image,
+              category: p.category,
+              estimated_time: p.time,
+              difficulty: p.difficulty,
+              is_ai_generated: p.isAiRemix || p.isAiIdea || false,
+              is_public: true,
+              likes: p.likes,
+              views: p.views,
+              metadata: {
+                fabrication_guide: p.steps || [],
+                maker_name: p.maker
+              }
+            });
+          }
+        }
+        localStorage.setItem('jejuremaker_initial_seeded_v1', 'true');
+      }
+
+      fetchProjects();
+    };
+
+    seedAndFetch();
 
     return () => subscription.unsubscribe();
   }, [authTargetView]);
@@ -303,18 +382,13 @@ const App: React.FC = () => {
       return p;
     }));
 
-    // Update database
+    // Update database using RPC
     try {
-      const project = projects.find(p => p.id === projectId);
-      if (!project) return;
-
-      // Only update database projects (not static ones)
       if (!projectId.startsWith('static-')) {
-        const newLikes = (project.likes || 0) + (isLiked ? -1 : 1);
-        const { error } = await supabase
-          .from('items')
-          .update({ likes: Math.max(0, newLikes) })
-          .eq('id', parseInt(projectId));
+        const { error } = await supabase.rpc('increment_likes', {
+          row_id: projectId,
+          amount: isLiked ? -1 : 1
+        });
 
         if (error) {
           console.error('Failed to update likes:', error);
@@ -356,19 +430,14 @@ const App: React.FC = () => {
         return p;
       }));
 
-      // Update database for non-static projects
+      // Update database using RPC
       if (!projectId.startsWith('static-')) {
-        const project = projects.find(p => p.id === projectId);
-        if (project) {
-          const newViews = (project.views || 0) + 1;
-          const { error } = await supabase
-            .from('items')
-            .update({ views: newViews })
-            .eq('id', parseInt(projectId));
+        const { error } = await supabase.rpc('increment_views', {
+          row_id: projectId
+        });
 
-          if (error) {
-            console.error('Failed to update views:', error);
-          }
+        if (error) {
+          console.error('Failed to update views:', error);
         }
       }
     } catch (error) {
@@ -545,7 +614,6 @@ const App: React.FC = () => {
           />
         );
       case 'workspace':
-        // Check if the selected project is an AI remix or idea
         const isAi = !!(selectedProject?.isAiRemix || selectedProject?.isAiIdea);
         return (
           <Workspace
@@ -629,16 +697,37 @@ const App: React.FC = () => {
             onLoginClick={handleLoginClick}
             onLogout={handleLogout}
             userTokens={userTokens}
+            setUserTokens={updateUserTokens}
+            onAddProject={handleAddProject}
+            onLikeToggle={handleLikeToggle}
+            likedProjects={likedProjects}
           />
         );
     }
   };
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'dark bg-background-dark' : 'bg-background-light'}`}>
+    <Layout
+      user={user}
+      userTokens={userTokens}
+      language={language}
+      toggleLanguage={toggleLanguage}
+      isDarkMode={isDarkMode}
+      toggleDarkMode={toggleDarkMode}
+      onLoginClick={handleLoginClick}
+      onNavigate={setCurrentView}
+      onLogout={handleLogout}
+      makers={MAKERS}
+      onAnalyzeClick={() => setShowWizard(true)}
+      showWizard={showWizard}
+      setShowWizard={setShowWizard}
+      setUserTokens={updateUserTokens}
+      onAddProject={handleAddProject}
+      currentView={currentView}
+    >
       {renderView()}
 
-      {/* Global Auth Modal */}
+      {/* Global Auth Modal - Keep it here or in Layout if preferred */}
       {showAuthModal && (
         <AuthModal
           supabase={supabase}
@@ -646,7 +735,7 @@ const App: React.FC = () => {
           currentView={authTargetView || undefined}
         />
       )}
-    </div>
+    </Layout>
   );
 };
 

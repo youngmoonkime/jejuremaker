@@ -152,6 +152,38 @@ const WizardModal: React.FC<WizardModalProps> = ({
         setCurrentStep('generation');
 
         try {
+            // Import supabase for saving
+            const supabaseUrl = 'https://jbkfsvinitavzyflcuwg.supabase.co';
+            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impia2ZzdmluaXRhdnp5ZmxjdXdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDAxOTUsImV4cCI6MjA4NDk3NjE5NX0.Nn3_-8Oky-yZ7VwFiiWbhxKdWfqOSz1ddj93fztfMak';
+            const { createClient } = await import('@supabase/supabase-js');
+            const supabase = createClient(supabaseUrl, supabaseKey);
+
+            // 1. Upload Image if exists
+            let finalImageUrl = imagePreview.startsWith('data:') ? null : imagePreview;
+
+            if (selectedImage) {
+                const fileExt = selectedImage.name.split('.').pop() || 'jpg';
+                const fileName = `wizard_${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
+
+                try {
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('item-images')
+                        .upload(fileName, selectedImage);
+
+                    if (uploadError) throw uploadError;
+
+                    const { data: publicUrlData } = supabase.storage
+                        .from('item-images')
+                        .getPublicUrl(fileName);
+
+                    finalImageUrl = publicUrlData.publicUrl;
+                } catch (err) {
+                    console.error("Image upload failed:", err);
+                    // Fallback to null or keep base64 (which won't save to DB but might work locally temporarily)
+                    // But we want to avoid saving base64 to text column if it's too huge.
+                }
+            }
+
             // TODO: Implement actual Gemini API call with gemini-1.5-pro
             // For now, simulate generation
             await new Promise(resolve => setTimeout(resolve, 3000));
@@ -159,12 +191,6 @@ const WizardModal: React.FC<WizardModalProps> = ({
             // Deduct tokens - pass the new value directly, not a callback
             const newTokenCount = userTokens - 5;
             setUserTokens(newTokenCount);
-
-            // Import supabase for saving
-            const supabaseUrl = 'https://jbkfsvinitavzyflcuwg.supabase.co';
-            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impia2ZzdmluaXRhdnp5ZmxjdXdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDAxOTUsImV4cCI6MjA4NDk3NjE5NX0.Nn3_-8Oky-yZ7VwFiiWbhxKdWfqOSz1ddj93fztfMak';
-            const { createClient } = await import('@supabase/supabase-js');
-            const supabase = createClient(supabaseUrl, supabaseKey);
 
             // Save project to Supabase
             const projectData = {
@@ -175,7 +201,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                 co2_reduction: 0.5,
                 estimated_time: '2h',
                 required_tools: userIntent.additionalNotes || '',
-                image_url: imagePreview.startsWith('data:') ? null : imagePreview, // Don't store base64 in DB
+                image_url: finalImageUrl,
                 is_ai_generated: true,
                 is_public: false,
                 owner_id: user?.id,
@@ -186,7 +212,8 @@ const WizardModal: React.FC<WizardModalProps> = ({
                         { title: '재료 준비', desc: `${materialAnalysis?.material} 세척 및 준비` },
                         { title: '제작', desc: `${userIntent.desiredOutcome} 형태로 가공` },
                         { title: '마무리', desc: '최종 마무리 및 장식' }
-                    ]
+                    ],
+                    images: finalImageUrl ? [finalImageUrl] : []
                 }
             };
 
@@ -208,7 +235,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                 id: savedProject?.id?.toString() || `wizard-${Date.now()}`,
                 title: `${materialAnalysis?.material}로 만든 ${userIntent.desiredOutcome}`,
                 maker: user?.email || 'Me',
-                image: imagePreview,
+                image: finalImageUrl || imagePreview, // Use uploaded URL or local preview
                 category: userIntent.category || 'Upcycling',
                 time: '2h',
                 difficulty: 'Medium',
@@ -220,7 +247,9 @@ const WizardModal: React.FC<WizardModalProps> = ({
                     { title: '마무리', desc: '최종 마무리 및 장식' }
                 ],
                 isPublic: false,
-                ownerId: user?.id
+                ownerId: user?.id,
+                likes: 0,
+                views: 0
             };
 
             onAddProject(newProject);
