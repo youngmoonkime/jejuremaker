@@ -28,12 +28,14 @@ import { Language } from '../App';
 // --- Cloudflare R2 Configuration ---
 // 주의: 실제 프로덕션 환경에서는 이 키들을 환경변수(.env)로 관리하거나 
 // 서버(Supabase Edge Function)에서 서명된 URL을 생성하여 사용하는 것이 보안상 안전합니다.
-const R2_ACCOUNT_ID = '170a312dca9dcb4790b82ea3f0bd3034';
-const R2_ACCESS_KEY_ID = '4e8c26d0b1a2d706fe96aa470704dc18';
-const R2_SECRET_ACCESS_KEY = '9e35d5139ae68e1f9fc305d8268494f8ab47755ca244b0369a0040e82c754f23';
-const R2_BUCKET_NAME = 'jeju-remaker-assets';
-// R2 버킷 설정에서 "Public Access"를 켜고, 해당 도메인을 입력하세요 (또는 Custom Domain)
-const R2_PUBLIC_DOMAIN = 'https://pub-b7d22eda2a2840a99f84fad5136127e0.r2.dev';
+import { config } from '../services/config';
+
+// --- Cloudflare R2 Configuration ---
+const R2_ACCOUNT_ID = config.r2.accountId;
+const R2_ACCESS_KEY_ID = config.r2.accessKeyId;
+const R2_SECRET_ACCESS_KEY = config.r2.secretAccessKey;
+const R2_BUCKET_NAME = config.r2.bucketName;
+const R2_PUBLIC_DOMAIN = config.r2.publicDomain;
 
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -282,7 +284,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   // --- Handlers ---
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const newFiles = Array.from(e.target.files);
+      const newFiles: File[] = Array.from(e.target.files as FileList);
       setImageFiles(prev => [...prev, ...newFiles]);
       const newUrls = newFiles.map(file => URL.createObjectURL(file));
       setPreviewUrls(prev => [...prev, ...newUrls]);
@@ -296,7 +298,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   const handleModelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const newFiles = Array.from(e.target.files);
+      const newFiles: File[] = Array.from(e.target.files as FileList);
 
       // Validate file size (10MB)
       const validFiles = newFiles.filter(file => {

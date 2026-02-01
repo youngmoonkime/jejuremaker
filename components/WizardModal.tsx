@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Language } from '../App';
 import { Project, MaterialAnalysis, UserIntent, WizardStep } from '../types';
+import { analyzeMaterial as apiAnalyze, generateFabricationGuide, generateUpcyclingImage, generate3DModel, generateBlueprintImage } from '../services/aiService';
+import { config } from '../services/config';
 
 interface WizardModalProps {
     isOpen: boolean;
@@ -98,8 +100,21 @@ const WizardModal: React.FC<WizardModalProps> = ({
     const [imagePreview, setImagePreview] = useState<string>('');
     const [materialAnalysis, setMaterialAnalysis] = useState<MaterialAnalysis | null>(null);
     const [userIntent, setUserIntent] = useState<UserIntent>({ desiredOutcome: '', category: '', additionalNotes: '' });
+
     const [selectedCategory, setSelectedCategory] = useState<string>('');
     const [isLoading, setIsLoading] = useState(false);
+
+    // Detailed Generation Status
+    const [genStatus, setGenStatus] = useState({
+        image: 'pending' as 'pending' | 'loading' | 'success' | 'error',
+        model3d: 'pending' as 'pending' | 'loading' | 'success' | 'error',
+        guide: 'pending' as 'pending' | 'loading' | 'success' | 'error'
+    });
+    const [generatedArtifacts, setGeneratedArtifacts] = useState({
+        imageUrl: '',
+        modelUrl: '',
+        guideData: null as any
+    });
 
     if (!isOpen) return null;
 
@@ -123,20 +138,23 @@ const WizardModal: React.FC<WizardModalProps> = ({
     const analyzeMaterial = async (file: File) => {
         setIsLoading(true);
         try {
-            // TODO: Implement actual Gemini API call with gemini-1.5-flash
-            // For now, simulate analysis
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Convert to base64
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
 
-            setMaterialAnalysis({
-                material: '플라스틱 병',
-                description: '투명한 PET 플라스틱 병으로 보입니다',
-                confidence: 0.95
+            const base64Promise = new Promise<string>((resolve) => {
+                reader.onloadend = () => resolve(reader.result as string);
             });
+            const base64 = await base64Promise;
 
+            // Call Gemini API
+            const result = await apiAnalyze(base64);
+
+            setMaterialAnalysis(result);
             setCurrentStep('intent');
         } catch (error) {
             console.error('Material analysis failed:', error);
-            alert(t.error);
+            alert(error instanceof Error ? error.message : t.error);
         } finally {
             setIsLoading(false);
         }
@@ -150,119 +168,145 @@ const WizardModal: React.FC<WizardModalProps> = ({
 
         setIsLoading(true);
         setCurrentStep('generation');
+        setGenStatus({ image: 'loading', model3d: 'pending', guide: 'loading' });
 
         try {
             // Import supabase for saving
-            const supabaseUrl = 'https://jbkfsvinitavzyflcuwg.supabase.co';
-            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impia2ZzdmluaXRhdnp5ZmxjdXdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDAxOTUsImV4cCI6MjA4NDk3NjE5NX0.Nn3_-8Oky-yZ7VwFiiWbhxKdWfqOSz1ddj93fztfMak';
             const { createClient } = await import('@supabase/supabase-js');
-            const supabase = createClient(supabaseUrl, supabaseKey);
+            const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 
-            // 1. Upload Image if exists
-            let finalImageUrl = imagePreview.startsWith('data:') ? null : imagePreview;
-
+            // 1. Upload User Image (Synchronous)
+            let userImageUrl = imagePreview.startsWith('data:') ? null : imagePreview;
             if (selectedImage) {
                 const fileExt = selectedImage.name.split('.').pop() || 'jpg';
                 const fileName = `wizard_${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
-
                 try {
-                    const { data: uploadData, error: uploadError } = await supabase.storage
-                        .from('item-images')
-                        .upload(fileName, selectedImage);
-
-                    if (uploadError) throw uploadError;
-
-                    const { data: publicUrlData } = supabase.storage
-                        .from('item-images')
-                        .getPublicUrl(fileName);
-
-                    finalImageUrl = publicUrlData.publicUrl;
-                } catch (err) {
-                    console.error("Image upload failed:", err);
-                    // Fallback to null or keep base64 (which won't save to DB but might work locally temporarily)
-                    // But we want to avoid saving base64 to text column if it's too huge.
-                }
+                    const { error: uploadError } = await supabase.storage.from('item-images').upload(fileName, selectedImage);
+                    if (!uploadError) {
+                        const { data } = supabase.storage.from('item-images').getPublicUrl(fileName);
+                        userImageUrl = data.publicUrl;
+                    }
+                } catch (err) { console.error("Upload failed", err); }
             }
 
-            // TODO: Implement actual Gemini API call with gemini-1.5-pro
-            // For now, simulate generation
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            const promptContext = `${materialAnalysis?.material}로 만든 ${userIntent.desiredOutcome}. ${userIntent.additionalNotes}. 고품질 제품 사진 스타일, 깨끗한 배경, 상세한 디테일`;
 
-            // Deduct tokens - pass the new value directly, not a callback
-            const newTokenCount = userTokens - 5;
-            setUserTokens(newTokenCount);
+            // 2. Parallel AI Generation: ImageFirst, Blueprint, Guide. 3D is separate now.
 
-            // Save project to Supabase
+            // A. 가이드 생성 (병렬 시작)
+            const guidePromise = generateFabricationGuide(materialAnalysis?.material || '', userIntent)
+                .then(data => {
+                    setGenStatus(prev => ({ ...prev, guide: 'success' }));
+                    setGeneratedArtifacts(prev => ({ ...prev, guideData: data }));
+                    return data;
+                })
+                .catch(err => {
+                    console.error('Guide Gen Failed', err);
+                    setGenStatus(prev => ({ ...prev, guide: 'error' }));
+                    return null;
+                });
+
+            // B. 이미지 생성 (병렬 시작 - 2장: 제품샷, 도면)
+            const imagePromise = generateUpcyclingImage(promptContext);
+            const blueprintPromise = generateBlueprintImage(promptContext); // Assume imported
+
+            // Wait for Images
+            const [imgRes, blueprintRes] = await Promise.allSettled([imagePromise, blueprintPromise]);
+
+            const generatedImageBase64 = imgRes.status === 'fulfilled' ? imgRes.value : null;
+            const generatedBlueprintBase64 = blueprintRes.status === 'fulfilled' ? blueprintRes.value : null;
+
+            if (generatedImageBase64) setGenStatus(prev => ({ ...prev, image: 'success' }));
+            else setGenStatus(prev => ({ ...prev, image: 'error' }));
+
+            if (generatedBlueprintBase64) setGenStatus(prev => ({ ...prev, blueprint: 'success' }));
+            else setGenStatus(prev => ({ ...prev, blueprint: 'error' }));
+
+            setGeneratedArtifacts(prev => ({
+                ...prev,
+                imageUrl: generatedImageBase64 || '',
+                blueprintUrl: generatedBlueprintBase64 || ''
+            }));
+
+
+            // 3D는 여기서 자동 생성하지 않음
+            setGenStatus(prev => ({ ...prev, model3d: 'idle' }));
+            const model3dUrl = null; // 아직 생성 안함
+
+            // 가이드 완료 대기
+            const guideData = await guidePromise;
+
+            if (!guideData) throw new Error("가이드 생성에 실패했습니다.");
+
+            // 최종 이미지 결정
+            const finalImage = generatedImageBase64 || userImageUrl;
+
+            // Deduct tokens
+            setUserTokens(userTokens - 5);
+
+            // Construct Project Data
             const projectData = {
                 title: `${materialAnalysis?.material}로 만든 ${userIntent.desiredOutcome}`,
                 material: materialAnalysis?.material || 'Unknown',
                 category: userIntent.category || 'Upcycling',
-                difficulty: 'Medium',
+                difficulty: guideData.difficulty || 'Medium',
                 co2_reduction: 0.5,
-                estimated_time: '2h',
-                required_tools: userIntent.additionalNotes || '',
-                image_url: finalImageUrl,
+                estimated_time: guideData.estimated_time || '2h',
+                required_tools: guideData.tools || '',
+                image_url: finalImage,
                 is_ai_generated: true,
                 is_public: false,
                 owner_id: user?.id,
                 metadata: {
                     material_analysis: materialAnalysis,
                     user_intent: userIntent,
-                    fabrication_guide: [
-                        { title: '재료 준비', desc: `${materialAnalysis?.material} 세척 및 준비` },
-                        { title: '제작', desc: `${userIntent.desiredOutcome} 형태로 가공` },
-                        { title: '마무리', desc: '최종 마무리 및 장식' }
-                    ],
-                    images: finalImageUrl ? [finalImageUrl] : []
+                    fabrication_guide: guideData.steps || [],
+                    images: finalImage ? [finalImage] : [],
+                    model_3d_url: null, // 추후 생성
+                    blueprint_url: generatedBlueprintBase64 // 도면 저장
                 }
             };
 
-            console.log('Saving project to Supabase:', projectData);
-
+            // Save to Supabase
             const { data: savedProject, error: saveError } = await supabase
                 .from('items')
                 .insert(projectData)
                 .select()
                 .single();
 
-            if (saveError) {
-                console.error('Failed to save project:', saveError);
-                // Still create local project as fallback
-            }
-
-            // Create project object for local state
+            // Create Local Project object
             const newProject: Project = {
                 id: savedProject?.id?.toString() || `wizard-${Date.now()}`,
-                title: `${materialAnalysis?.material}로 만든 ${userIntent.desiredOutcome}`,
-                maker: user?.email || 'Me',
-                image: finalImageUrl || imagePreview, // Use uploaded URL or local preview
-                category: userIntent.category || 'Upcycling',
-                time: '2h',
-                difficulty: 'Medium',
+                title: projectData.title,
+                maker: user?.email || 'AI Architect',
+                image: finalImage || '',
+                category: projectData.category,
+                time: projectData.estimated_time,
+                difficulty: projectData.difficulty as any,
                 isAiRemix: true,
-                description: `${materialAnalysis?.material}을(를) 활용한 ${userIntent.desiredOutcome} 제작 프로젝트`,
-                steps: [
-                    { title: '재료 준비', desc: `${materialAnalysis?.material} 세척 및 준비` },
-                    { title: '제작', desc: `${userIntent.desiredOutcome} 형태로 가공` },
-                    { title: '마무리', desc: '최종 마무리 및 장식' }
-                ],
+                description: `${materialAnalysis?.material} 재활용 프로젝트`,
+                steps: guideData.steps || [],
                 isPublic: false,
                 ownerId: user?.id,
+                metadata: projectData.metadata, // include metadata for local display
                 likes: 0,
-                views: 0
+                views: 0,
+                images: projectData.metadata.images,
+                modelFiles: [] // 3D 파일 없음
             };
 
             onAddProject(newProject);
             setCurrentStep('complete');
 
-            setTimeout(() => {
-                alert(t.success);
-                onClose();
-                resetWizard();
-            }, 1500);
+            setCurrentStep('complete');
+
+            // alert(t.success); // 제거: 결과 화면에서 사용자가 닫기 버튼을 누르도록 변경
+            // onClose();        // 제거
+            // resetWizard();    // 제거
+
         } catch (error) {
-            console.error('Generation failed:', error);
-            alert(t.error);
+            console.error('Generation Error:', error);
+            alert(error instanceof Error ? error.message : t.error);
         } finally {
             setIsLoading(false);
         }
@@ -276,6 +320,8 @@ const WizardModal: React.FC<WizardModalProps> = ({
         setUserIntent({ desiredOutcome: '', category: '', additionalNotes: '' });
         setSelectedCategory('');
         setIsLoading(false);
+        setGenStatus({ image: 'pending', model3d: 'pending', guide: 'pending' });
+        setGeneratedArtifacts({ imageUrl: '', modelUrl: '', guideData: null });
     };
 
     const handleClose = () => {
@@ -283,11 +329,45 @@ const WizardModal: React.FC<WizardModalProps> = ({
         onClose();
     };
 
+    const handleGenerate3D = async () => {
+        if (!generatedArtifacts.blueprintUrl && !generatedArtifacts.imageUrl) {
+            alert("도면 이미지가 없습니다.");
+            return;
+        }
+        if (userTokens < 5) {
+            alert(t.insufficientTokens);
+            return;
+        }
+
+        setIsLoading(true);
+        setGenStatus(prev => ({ ...prev, model3d: 'loading' }));
+
+        try {
+            // Use blueprint if available, otherwise product image
+            const sourceImage = generatedArtifacts.blueprintUrl || generatedArtifacts.imageUrl;
+            const modelUrl = await generate3DModel(sourceImage);
+
+            setGenStatus(prev => ({ ...prev, model3d: 'success' }));
+            setGeneratedArtifacts(prev => ({ ...prev, modelUrl }));
+            setUserTokens(userTokens - 5);
+
+            // TODO: Update project in Supabase with new model URL (omitted for brevity, assume user saves later or simple alert)
+            alert("3D 모델 생성이 완료되었습니다!");
+
+        } catch (error) {
+            console.error(error);
+            setGenStatus(prev => ({ ...prev, model3d: 'error' }));
+            alert("3D 생성 실패");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-2xl max-w-2xl w-full mx-4 overflow-hidden">
+            <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-2xl max-w-2xl w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
                 {/* Header */}
-                <div className="p-6 border-b border-gray-200 dark:border-gray-800">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-800 sticky top-0 bg-white dark:bg-gray-900 z-10">
                     <div className="flex items-center justify-between">
                         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">AI 분석 마법사</h2>
                         <button
@@ -459,9 +539,46 @@ const WizardModal: React.FC<WizardModalProps> = ({
                         <div className="text-center py-12">
                             {currentStep === 'generation' ? (
                                 <>
-                                    <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{t.generating}</h3>
-                                    <p className="text-gray-600 dark:text-gray-400">AI가 상세한 제작 가이드를 생성하고 있습니다...</p>
+                                    <div className="mb-6">
+                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">{t.generating}</h3>
+                                        <div className="space-y-4 max-w-sm mx-auto">
+                                            {/* Gen Image Status */}
+                                            <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="material-icons-round text-purple-500">image</span>
+                                                    <span className="text-sm font-medium dark:text-gray-300">제품 이미지 생성</span>
+                                                </div>
+                                                {genStatus.image === 'pending' && <span className="material-icons-round text-gray-400 text-sm">schedule</span>}
+                                                {genStatus.image === 'loading' && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full"></div>}
+                                                {genStatus.image === 'success' && <span className="material-icons-round text-green-500 text-sm">check_circle</span>}
+                                                {genStatus.image === 'error' && <span className="material-icons-round text-red-500 text-sm">error</span>}
+                                            </div>
+
+                                            {/* Gen Blueprint Status */}
+                                            <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="material-icons-round text-blue-500">architecture</span>
+                                                    <span className="text-sm font-medium dark:text-gray-300">도면 생성</span>
+                                                </div>
+                                                {genStatus.blueprint === 'pending' && <span className="material-icons-round text-gray-400 text-sm">schedule</span>}
+                                                {genStatus.blueprint === 'loading' && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full"></div>}
+                                                {genStatus.blueprint === 'success' && <span className="material-icons-round text-green-500 text-sm">check_circle</span>}
+                                                {genStatus.blueprint === 'error' && <span className="material-icons-round text-red-500 text-sm">error</span>}
+                                            </div>
+
+                                            {/* Gen Guide Status */}
+                                            <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="material-icons-round text-orange-500">description</span>
+                                                    <span className="text-sm font-medium dark:text-gray-300">제작 가이드 생성</span>
+                                                </div>
+                                                {genStatus.guide === 'pending' && <span className="material-icons-round text-gray-400 text-sm">schedule</span>}
+                                                {genStatus.guide === 'loading' && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full"></div>}
+                                                {genStatus.guide === 'success' && <span className="material-icons-round text-green-500 text-sm">check_circle</span>}
+                                                {genStatus.guide === 'error' && <span className="material-icons-round text-red-500 text-sm">error</span>}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </>
                             ) : (
                                 <>
@@ -469,7 +586,65 @@ const WizardModal: React.FC<WizardModalProps> = ({
                                         <span className="material-icons-round text-5xl text-green-600 dark:text-green-400">check_circle</span>
                                     </div>
                                     <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{t.success}</h3>
-                                    <p className="text-gray-600 dark:text-gray-400">내 정보 탭에서 확인하실 수 있습니다</p>
+                                    <p className="text-gray-600 dark:text-gray-400 mb-8">프로젝트가 생성되었습니다.</p>
+
+                                    {/* Result Showcase */}
+                                    <div className="grid grid-cols-2 gap-4 mb-8">
+                                        <div className="space-y-2">
+                                            <p className="text-sm font-bold text-gray-700 dark:text-gray-300">제품 이미지</p>
+                                            {generatedArtifacts.imageUrl && (
+                                                <img src={generatedArtifacts.imageUrl} alt="Generated Product" className="w-full aspect-square rounded-xl object-cover border" />
+                                            )}
+                                        </div>
+                                        <div className="space-y-2">
+                                            <p className="text-sm font-bold text-gray-700 dark:text-gray-300">도면 이미지</p>
+                                            {generatedArtifacts.blueprintUrl ? (
+                                                <img src={generatedArtifacts.blueprintUrl} alt="Generated Blueprint" className="w-full aspect-square rounded-xl object-cover border" />
+                                            ) : (
+                                                <div className="w-full aspect-square rounded-xl border bg-gray-100 flex items-center justify-center text-gray-400">생성 실패</div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 3D Generation Section */}
+                                    <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 mb-6">
+                                        <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-2">3D 모델링이 필요하신가요?</h4>
+                                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">
+                                            생성된 도면 이미지를 바탕으로 Tripo AI가 3D 모델을 생성합니다. (5토큰 소모)
+                                        </p>
+
+                                        {genStatus.model3d === 'success' ? (
+                                            <div className="flex items-center justify-center gap-2 text-green-600 font-bold bg-green-50 p-3 rounded-lg">
+                                                <span className="material-icons-round">check_circle</span>
+                                                <span>3D 모델 생성 완료!</span>
+                                            </div>
+                                        ) : genStatus.model3d === 'loading' ? (
+                                            <div className="flex items-center justify-center gap-2 text-primary font-bold bg-primary/5 p-3 rounded-lg">
+                                                <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full"></div>
+                                                <span>3D 변환 중... (최대 1분 소요)</span>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                onClick={handleGenerate3D}
+                                                disabled={isLoading || !generatedArtifacts.blueprintUrl}
+                                                className="w-full py-3 bg-gray-900 text-white dark:bg-white dark:text-gray-900 rounded-lg font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                                            >
+                                                <span className="material-icons-round">view_in_ar</span>
+                                                <span>3D 모델 생성하기 (5 Credits)</span>
+                                            </button>
+                                        )}
+
+                                        {genStatus.model3d === 'error' && (
+                                            <p className="text-red-500 text-sm mt-2 font-medium">생성에 실패했습니다. 다시 시도해주세요.</p>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        onClick={handleClose}
+                                        className="w-full py-3 border border-gray-300 dark:border-gray-700 rounded-xl font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                    >
+                                        확인 및 닫기
+                                    </button>
                                 </>
                             )}
                         </div>

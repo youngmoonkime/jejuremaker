@@ -40,6 +40,7 @@ export interface Project {
   isPublic?: boolean; // 공개 여부 (기본값: false)
   ownerId?: string; // 소유자 ID
   createdAt?: string; // 생성 날짜
+  metadata?: any; // 추가 메타데이터 (Blueprint URL 등)
 }
 
 export interface Message {

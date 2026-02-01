@@ -98,24 +98,7 @@ const TRANSLATIONS = {
     }
 };
 
-const Community: React.FC<CommunityProps> = ({ onNavigate, user, onLoginClick }) => {
-    const t = TRANSLATIONS['ko']; // Defaulting to KO as language prop isn't used for translation selection in this component yet, but provided in props. 
-    // Actually, checking previous code, it used `language` prop. Let's fix that.
-
-    return (
-        <CommunityContent language={user ? 'ko' : 'ko'} t={TRANSLATIONS[user ? 'ko' : 'ko']} onNavigate={onNavigate} user={user} onLoginClick={onLoginClick} />
-    );
-};
-
-// Helper component to use language properly if passed down, but to match previous logic,
-// I see I missed `language` in destructuring in the previous view. 
-// Let's look at the original component signature:
-// const Community: React.FC<CommunityProps> = ({ onNavigate, isDarkMode, toggleDarkMode, language, toggleLanguage, user, onLoginClick, onLogout }) => {
-// And usage: const t = TRANSLATIONS[language];
-
-// So I should stick to that.
-
-const CommunityFixed: React.FC<CommunityProps> = ({ onNavigate, language, user, onLoginClick }) => {
+const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLoginClick }) => {
     const t = TRANSLATIONS[language];
 
     return (
@@ -257,4 +240,4 @@ const CommunityFixed: React.FC<CommunityProps> = ({ onNavigate, language, user, 
     );
 };
 
-export default CommunityFixed;
+export default Community;

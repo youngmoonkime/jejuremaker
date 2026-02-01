@@ -171,7 +171,16 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
   const displayTitle = project?.title || t.title;
   const displayDesc = project?.description || t.description;
   const displayImage = project?.image || 'https://lh3.googleusercontent.com/aida-public/AB6AXuDfv7rlXQezFNRd55ViDyVQxZHy5hmFeJRXuYnIhyBrqgo6LsrhVYeZKMz0Mhkh3SM8YgXWYE8qI8_RMrYNIAEJKuWxoO9Wo2s-xMLQKI7o6W0Jfaw_ASJFO3TLZHM35y9JiY1bjQqF-zcsSKoVkW980qHM3rsSDBkRaH6xYmQehOScGrNFCt7L78QxSK__Ljxwcv05op5YxYRS3fRAQLmMyiiiQ5-rMV71Mh-zSiVnCOO856cB0S6IrvFPabp6DIRjOMalBsw9bno';
-  const displayImages = project?.images || [displayImage]; // 모든 이미지
+
+  // Get Blueprint URL
+  const blueprintUrl = (project as any)?.metadata?.blueprint_url;
+
+  // Update displayImages to include blueprint if available
+  const notebookImages = project?.images || [displayImage];
+  const displayImages = blueprintUrl && !notebookImages.includes(blueprintUrl)
+    ? [...notebookImages, blueprintUrl]
+    : notebookImages;
+
   const displayCategory = project?.category || t.printing;
   const displayTime = project?.time || '4h 20m';
   const displayDifficulty = project?.difficulty || 'Medium';
@@ -180,11 +189,24 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
   const isAiProject = project?.isAiRemix || project?.isAiIdea;
 
   // 3D 모델 파일 찾기
-  const model3DFile = project?.modelFiles?.find(
-    file => file.name.toLowerCase().endsWith('.glb') ||
-      file.name.toLowerCase().endsWith('.stl') ||
-      file.name.toLowerCase().endsWith('.gltf')
-  );
+  const getModel3DUrl = (): string | null => {
+    // 1. 먼저 metadata.model_3d_url 확인 (AI 생성 프로젝트)
+    const metadataUrl = (project as any)?.metadata?.model_3d_url;
+    if (metadataUrl) {
+      return metadataUrl;
+    }
+
+    // 2. modelFiles에서 3D 파일 찾기
+    const model3DFile = project?.modelFiles?.find(
+      file => file.name.toLowerCase().endsWith('.glb') ||
+        file.name.toLowerCase().endsWith('.stl') ||
+        file.name.toLowerCase().endsWith('.gltf')
+    );
+
+    return model3DFile?.url || null;
+  };
+
+  const model3DUrl = getModel3DUrl();
 
   // Logic for fabrication steps
   // If the project has custom steps, use them. Otherwise use the default steps from translation.
@@ -196,6 +218,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
       tip: s.tip
     }))
     : t.steps;
+
+  // Handle Image Selection from Thumbnails
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const currentDisplayImage = displayImages[selectedImageIndex] || displayImage;
 
   return (
     <>
@@ -214,8 +240,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
               {/* Conditional Content based on View Mode */}
               {viewMode === '3d' ? (
                 <div className="w-full h-full bg-[#111111] relative overflow-hidden">
-                  {model3DFile ? (
-                    <ThreeDViewer modelUrl={model3DFile.url} className="w-full h-full" />
+                  {model3DUrl ? (
+                    <ThreeDViewer modelUrl={model3DUrl} className="w-full h-full" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <p className="text-white/50 text-sm">3D 모델 파일이 없습니다</p>
@@ -228,44 +254,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
               ) : (
                 <>
                   <img
-                    src={displayImage}
+                    src={currentDisplayImage}
                     alt={displayTitle}
-                    className={`w-full h-full object-cover transition-all duration-500 
-                        ${viewMode === 'blueprint' ? 'invert grayscale contrast-125 brightness-110' : ''}
-                      `}
+                    className="w-full h-full object-cover transition-all duration-500"
                   />
 
-                  {/* Blueprint Overlay */}
-                  {viewMode === 'blueprint' && (
-                    <div className="absolute inset-0 pointer-events-none z-10 bg-blue-900/30 mix-blend-multiply">
-                      <div className="absolute inset-0" style={{
-                        backgroundImage: 'linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)',
-                        backgroundSize: '40px 40px'
-                      }}></div>
-                      <div className="absolute bottom-8 right-8 border-2 border-white/50 p-4 rounded-lg bg-blue-900/80 backdrop-blur text-white font-mono text-xs">
-                        <div className="flex justify-between gap-8 border-b border-white/30 pb-1 mb-1">
-                          <span>SCALE</span>
-                          <span>1:2</span>
-                        </div>
-                        <div className="flex justify-between gap-8 border-b border-white/30 pb-1 mb-1">
-                          <span>UNIT</span>
-                          <span>MM</span>
-                        </div>
-                        <div className="flex justify-between gap-8">
-                          <span>REV</span>
-                          <span>A.02</span>
-                        </div>
-                      </div>
-
-                      {/* SVG Measurement Overlay for Blueprint */}
-                      <svg className="w-full h-full absolute inset-0" viewBox="0 0 800 450" preserveAspectRatio="none">
-                        <line x1="520" y1="80" x2="520" y2="370" stroke="white" strokeWidth="1" strokeDasharray="4 2" opacity="0.8" />
-                        <line x1="510" y1="80" x2="530" y2="80" stroke="white" strokeWidth="1" />
-                        <line x1="510" y1="370" x2="530" y2="370" stroke="white" strokeWidth="1" />
-                        <text x="540" y="230" fill="white" fontFamily="monospace" fontSize="12" transform="rotate(90 540,230)">250.00</text>
-
-                        <circle cx="350" cy="225" r="120" fill="none" stroke="white" strokeWidth="1" strokeDasharray="4 2" opacity="0.3" />
-                      </svg>
+                  {/* Label for Blueprint */}
+                  {currentDisplayImage === blueprintUrl && (
+                    <div className="absolute top-4 right-4 px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded-full shadow-lg">
+                      BLUEPRINT
                     </div>
                   )}
                 </>
@@ -277,9 +274,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
                     ${viewMode === 'default' ? 'bg-white/90 text-gray-800 border-white/50' : 'bg-primary text-white border-primary/50'}
                   `}>
                   <span className={`w-2 h-2 rounded-full ${viewMode === 'default' ? 'bg-gray-400' : 'bg-white animate-pulse'}`}></span>
-                  {viewMode === 'default' ? t.view3D : (
-                    viewMode === '3d' ? '3D Active' : t.blueprint
-                  )}
+                  {viewMode === '3d' ? '3D Active' : 'Image View'}
                 </span>
 
                 {isAiProject ? (
@@ -303,15 +298,21 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
                 {displayImages.map((imgUrl, index) => (
                   <button
                     key={`img-${index}`}
-                    onClick={() => setViewMode('default')}
-                    className={`relative w-20 h-20 rounded-xl overflow-hidden border-2 shadow-sm flex-shrink-0 transition-transform hover:scale-105 ${viewMode === 'default' ? 'border-primary' : 'border-transparent'}`}
+                    onClick={() => {
+                      setViewMode('default');
+                      setSelectedImageIndex(index);
+                    }}
+                    className={`relative w-20 h-20 rounded-xl overflow-hidden border-2 shadow-sm flex-shrink-0 transition-transform hover:scale-105 ${viewMode === 'default' && currentDisplayImage === imgUrl ? 'border-primary ring-2 ring-primary/30' : 'border-transparent'}`}
                   >
                     <img src={imgUrl} alt={`Image ${index + 1}`} className="w-full h-full object-cover" />
+                    {imgUrl === blueprintUrl && (
+                      <div className="absolute inset-x-0 bottom-0 bg-black/50 text-white text-[10px] text-center py-0.5">도면</div>
+                    )}
                   </button>
                 ))}
 
                 {/* 3D 뷰어 썸네일 */}
-                {model3DFile && (
+                {model3DUrl && (
                   <button
                     onClick={() => handleToolClick('3d')}
                     className={`relative w-20 h-20 rounded-xl overflow-hidden border transition-all flex-shrink-0 flex items-center justify-center hover:scale-105 cursor-pointer
@@ -331,15 +332,6 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
                   `}>
                   <span className="material-icons-round text-lg">view_in_ar</span>
                   <span>{t.view3DButton}</span>
-                </button>
-                <button onClick={() => handleToolClick('blueprint')} className={`flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-3 rounded-xl border transition-colors text-sm font-semibold group
-                      ${viewMode === 'blueprint'
-                    ? 'bg-primary text-white border-primary'
-                    : 'border-dashed border-primary/50 text-primary bg-primary/5 hover:bg-primary/10'
-                  }
-                  `}>
-                  <span className="material-icons-round text-lg group-hover:scale-110 transition-transform">architecture</span>
-                  <span>{t.generateBlueprint}</span>
                 </button>
               </div>
             </div>

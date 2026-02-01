@@ -11,10 +11,10 @@ import Profile from './components/Profile';
 import Layout from './components/Layout';
 import { Project, Maker } from './types';
 
+import { config } from './services/config';
+
 // Supabase Configuration
-const supabaseUrl = 'https://jbkfsvinitavzyflcuwg.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impia2ZzdmluaXRhdnp5ZmxjdXdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDAxOTUsImV4cCI6MjA4NDk3NjE5NX0.Nn3_-8Oky-yZ7VwFiiWbhxKdWfqOSz1ddj93fztfMak';
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 
 type ViewState = 'discovery' | 'detail' | 'workspace' | 'upload' | 'trending' | 'community' | 'profile';
 export type Language = 'ko' | 'en';
@@ -147,7 +147,10 @@ const App: React.FC = () => {
             description: item.metadata?.description || item.description || (item.title + ' - Custom project'),
             steps: item.metadata?.fabrication_guide || [],
             downloadUrl: item.metadata?.download_url || '', // Map the download link
-            modelFiles: item.metadata?.model_files || [], // 여러 파일 지원
+            // metadata.model_3d_url이 있으면 modelFiles에 추가
+            modelFiles: item.metadata?.model_3d_url
+              ? [{ name: '3d_model.glb', type: 'glb', size: 0, url: item.metadata.model_3d_url }, ...(item.metadata?.model_files || [])]
+              : (item.metadata?.model_files || []),
             isPublic: item.is_public ?? true, // Default to public for existing items
             ownerId: item.owner_id,
             likes: item.likes || 0, // Add likes
@@ -244,7 +247,9 @@ const App: React.FC = () => {
             description: item.title + ' - Custom project',
             steps: item.metadata?.fabrication_guide || [],
             downloadUrl: item.metadata?.download_url || '',
-            modelFiles: item.metadata?.model_files || [],
+            modelFiles: item.metadata?.model_3d_url
+              ? [{ name: '3d_model.glb', type: 'glb', size: 0, url: item.metadata.model_3d_url }, ...(item.metadata?.model_files || [])]
+              : (item.metadata?.model_files || []),
             isPublic: item.is_public ?? false,
             ownerId: item.owner_id,
             likes: item.likes || 0,

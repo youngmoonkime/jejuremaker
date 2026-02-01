@@ -48,28 +48,32 @@ const Layout: React.FC<LayoutProps> = ({
 }) => {
     return (
         <div className={`min-h-screen text-gray-800 dark:text-gray-100 bg-background-light dark:bg-background-dark transition-colors duration-300`}>
-            <Header
-                user={user}
-                userTokens={userTokens}
-                language={language}
-                toggleLanguage={toggleLanguage}
-                isDarkMode={isDarkMode}
-                toggleDarkMode={toggleDarkMode}
-                onLoginClick={onLoginClick}
-                onNavigate={onNavigate}
-                onLogout={onLogout}
-            />
-
-            <div className="max-w-[1600px] mx-auto pt-24 pb-12 px-6 flex gap-10">
-                <Sidebar
+            {currentView !== 'upload' && (
+                <Header
+                    user={user}
+                    userTokens={userTokens}
                     language={language}
+                    toggleLanguage={toggleLanguage}
+                    isDarkMode={isDarkMode}
+                    toggleDarkMode={toggleDarkMode}
+                    onLoginClick={onLoginClick}
                     onNavigate={onNavigate}
-                    makers={makers}
-                    onAnalyzeClick={onAnalyzeClick}
-                    currentView={currentView}
+                    onLogout={onLogout}
                 />
+            )}
 
-                <main className="flex-1 min-w-0">
+            <div className={currentView === 'upload' ? 'w-full h-screen' : "max-w-[1600px] mx-auto pt-24 pb-12 px-6 flex gap-10"}>
+                {currentView !== 'upload' && (
+                    <Sidebar
+                        language={language}
+                        onNavigate={onNavigate}
+                        makers={makers}
+                        onAnalyzeClick={onAnalyzeClick}
+                        currentView={currentView}
+                    />
+                )}
+
+                <main className={currentView === 'upload' ? 'w-full h-full' : "flex-1 min-w-0"}>
                     {children}
                 </main>
             </div>

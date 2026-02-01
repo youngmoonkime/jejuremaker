@@ -60,7 +60,9 @@ const ThreeDViewer: React.FC<ThreeDViewerProps> = ({ modelUrl, className = '' })
         controlsRef.current = controls;
 
         // Load Model
-        const fileExtension = modelUrl.split('.').pop()?.toLowerCase();
+        // Parse extension handling query params
+        const cleanUrl = modelUrl.split('?')[0];
+        const fileExtension = cleanUrl.split('.').pop()?.toLowerCase();
 
         if (fileExtension === 'glb' || fileExtension === 'gltf') {
             const loader = new GLTFLoader();
