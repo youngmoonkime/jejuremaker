@@ -3,6 +3,7 @@ import { Project } from '../types';
 import { Language } from '../App';
 import { User } from '@supabase/supabase-js';
 import { TRANSLATIONS } from '../constants/translations';
+import HeroSection from './HeroSection';
 
 interface DiscoveryProps {
   onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community' | 'profile') => void;
@@ -82,65 +83,19 @@ const Discovery: React.FC<DiscoveryProps> = ({
   return (
     <>
       {/* Trending Slider */}
-      <div className="mb-12 relative rounded-3xl overflow-hidden h-80 bg-gradient-to-br from-gray-900 to-gray-800 shadow-xl">
-        <div className="relative h-full">
-          {/* Slider Content */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-full max-w-5xl px-8">
-              <div className="grid md:grid-cols-2 gap-8 items-center">
-                {/* Left: Campaign Info */}
-                <div className="text-white space-y-4">
-                  <div className="inline-flex items-center gap-2 bg-primary/20 backdrop-blur-sm px-4 py-2 rounded-full border border-primary/30">
-                    <span className="material-icons-round text-sm text-primary">campaign</span>
-                    <span className="text-sm font-bold text-primary">이달의 캠페인</span>
-                  </div>
-                  <h2 className="text-4xl md:text-5xl font-bold leading-tight">
-                    제주 바다를 지키는
-                    <br />
-                    <span className="text-primary">업사이클링 챌린지</span>
-                  </h2>
-                  <p className="text-gray-300 text-lg">
-                    해양 폐기물을 활용한 창작물을 만들고 공유해보세요. 우수작에게는 특별한 혜택이 제공됩니다.
-                  </p>
-                  <div className="flex items-center gap-4 pt-2">
-                    <button className="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/30 hover:scale-105">
-                      참여하기
-                    </button>
-                    <button className="px-6 py-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm text-white rounded-xl font-bold transition-all border border-white/20">
-                      자세히 보기
-                    </button>
-                  </div>
-                </div>
-
-                {/* Right: Featured Projects */}
-                <div className="hidden md:grid grid-cols-2 gap-4">
-                  <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all cursor-pointer group">
-                    <div className="aspect-square bg-gradient-to-br from-blue-400 to-purple-500 rounded-xl mb-3 overflow-hidden">
-                      <img src="https://images.unsplash.com/photo-1618477461853-cf6ed80faba5?auto=format&fit=crop&w=400&q=80" alt="Project" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                    </div>
-                    <h4 className="text-white font-bold text-sm mb-1">해양 폐플라스틱 조명</h4>
-                    <p className="text-gray-400 text-xs">by EcoMaker</p>
-                  </div>
-                  <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all cursor-pointer group mt-8">
-                    <div className="aspect-square bg-gradient-to-br from-green-400 to-teal-500 rounded-xl mb-3 overflow-hidden">
-                      <img src="https://images.unsplash.com/photo-1610701596007-11502861dcfa?auto=format&fit=crop&w=400&q=80" alt="Project" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                    </div>
-                    <h4 className="text-white font-bold text-sm mb-1">폐어망 바구니</h4>
-                    <p className="text-gray-400 text-xs">by SeaCraft</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation Dots */}
-          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-2">
-            <button className="w-2 h-2 rounded-full bg-primary"></button>
-            <button className="w-2 h-2 rounded-full bg-white/30 hover:bg-white/50 transition-colors"></button>
-            <button className="w-2 h-2 rounded-full bg-white/30 hover:bg-white/50 transition-colors"></button>
-          </div>
-        </div>
-      </div>
+      {/* Trending Slider */}
+      <HeroSection
+        t={t}
+        handleAnalyzeClick={() => document.getElementById('image-upload-input')?.click()}
+        handlePaste={(e) => {
+          // Implement paste logic or stub
+          console.log('Paste handled in HeroSection');
+        }}
+        isDragging={false} // Connect drag state if available or use local state
+        handleDragOver={(e) => e.preventDefault()}
+        handleDragLeave={(e) => e.preventDefault()}
+        handleDrop={(e) => e.preventDefault()}
+      />
 
       {/* Filters - Dynamic Material Categories */}
       <div className="flex items-center justify-between mb-8 overflow-x-auto pb-2 scrollbar-hide">
@@ -204,19 +159,6 @@ const Discovery: React.FC<DiscoveryProps> = ({
                   {t.handmade}
                 </div>
               )}
-
-              <button
-                className={`absolute bottom-3 right-3 w-10 h-10 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-md transition-all duration-300 ${likedProjects.has(project.id)
-                  ? 'text-red-500 translate-y-0 opacity-100'
-                  : 'text-gray-400 hover:text-red-500 translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100'
-                  }`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onLikeToggle(project.id);
-                }}
-              >
-                <span className="material-icons-round">{likedProjects.has(project.id) ? 'favorite' : 'favorite_border'}</span>
-              </button>
 
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors duration-300"></div>
             </div>

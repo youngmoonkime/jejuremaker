@@ -28,10 +28,34 @@ const Header: React.FC<HeaderProps> = ({
 }) => {
     const t = TRANSLATIONS[language];
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+    const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+    // Jeju Re-Maker relevant popular topics
+    const popularTopics = [
+        { rank: 1, text: "해녀복 업사이클링", isHot: true },
+        { rank: 2, text: "바다유리 램프", isHot: true },
+        { rank: 3, text: "현무암 캔들", isHot: true },
+        { rank: 4, text: "폐그물 가방", isHot: false },
+        { rank: 5, text: "감귤 가죽 지갑", isHot: false },
+        { rank: 6, text: "플라스틱 키링", isHot: false },
+        { rank: 7, text: "비치코밍 아트", isHot: false },
+    ];
+
+    // Jeju Re-Maker relevant recommended collections
+    const recommendedTopics = [
+        { rank: 1, text: "제로웨이스트" },
+        { rank: 2, text: "인테리어 소품" },
+        { rank: 3, text: "친환경 선물" },
+        { rank: 4, text: "원데이 클래스" },
+        { rank: 5, text: "제주 기념품" },
+        { rank: 6, text: "DIY 키트" },
+        { rank: 7, text: "해양 정화" },
+        { rank: 8, text: "에코 패키지" },
+    ];
 
     return (
-        <header className="fixed top-0 w-full z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 h-16 transition-colors duration-300">
-            <div className="max-w-[1600px] mx-auto px-6 h-full flex items-center justify-between">
+        <header className="fixed top-0 w-full z-50 bg-white/80 dark:bg-[#121212]/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 h-16 transition-colors duration-300">
+            <div className="max-w-[1600px] mx-auto px-6 h-full flex items-center justify-between relative">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavigate('discovery')}>
                     <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/30">
                         <span className="material-icons-round text-xl">recycling</span>
@@ -39,20 +63,58 @@ const Header: React.FC<HeaderProps> = ({
                     <span className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">Jeju <span className="text-primary">Re-Maker</span></span>
                 </div>
 
-                {/* Search Input */}
-                <div className="hidden md:flex flex-1 mx-8 max-w-2xl">
-                    <div className="bg-white dark:bg-gray-800 p-2 rounded-full shadow-lg flex items-center w-full transition-all duration-300 focus-within:shadow-xl border border-gray-200 dark:border-gray-700">
-                        <div className="pl-4 pr-2 text-gray-400">
-                            <span className="material-icons-round">search</span>
+                {/* Search Input Container */}
+                <div className="hidden md:flex flex-1 mx-8 justify-center relative z-50">
+                    <div className={`relative w-full transition-all duration-300 ${isSearchFocused ? 'max-w-2xl' : 'max-w-lg'}`}>
+                        <div className="bg-gray-100 dark:bg-[#1e1e1e] px-4 py-1.5 rounded-full flex items-center w-full border border-transparent focus-within:bg-white dark:focus-within:bg-[#252525] focus-within:shadow-[0_0_20px_rgba(16,183,127,0.15)] focus-within:border-primary/30 transition-all duration-300">
+                            <div className={`mr-3 transition-colors duration-300 ${isSearchFocused ? 'text-primary' : 'text-gray-400'}`}>
+                                <span className="material-icons-round text-xl">search</span>
+                            </div>
+                            <input
+                                type="text"
+                                placeholder={t.heroPlaceholder || "모델, 사용자, 컬렉션 및 게시물 검색"}
+                                className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-500 text-sm h-full py-1"
+                                onFocus={() => setIsSearchFocused(true)}
+                                onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)} // Delay to allow clicks
+                            />
                         </div>
-                        <input
-                            type="text"
-                            placeholder={t.heroPlaceholder}
-                            className="flex-1 bg-transparent border-none focus:ring-0 text-gray-800 dark:text-white placeholder-gray-400 text-sm"
-                        />
-                        <button className="bg-primary hover:bg-primary-dark text-white rounded-full p-2.5 transition-colors shadow-lg shadow-primary/30">
-                            <span className="material-icons-round text-sm">arrow_forward</span>
-                        </button>
+
+                        {/* Search Dropdown (Popular Topics) */}
+                        {isSearchFocused && (
+                            <div className="absolute top-full left-0 w-full mt-2 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden p-6 animate-in fade-in zoom-in-95 duration-200">
+                                <div className="grid grid-cols-2 gap-8">
+                                    {/* Column 1: Popular Topics */}
+                                    <div>
+                                        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-200 mb-4">인기 주제</h3>
+                                        <div className="flex items-center gap-2 mb-3 text-sm text-[#ff4c4c] font-medium">
+                                            <span className="material-icons-round text-base">trending_up</span>
+                                            <span>제주 업사이클링</span>
+                                        </div>
+                                        <ul className="space-y-2.5">
+                                            {popularTopics.map((topic) => (
+                                                <li key={topic.rank} className="flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 p-1 rounded-md transition-colors">
+                                                    <span className={`font-bold w-4 text-center ${topic.rank <= 3 ? 'text-[#ff4c4c]' : 'text-gray-400'}`}>{topic.rank}</span>
+                                                    <span className="text-gray-700 dark:text-gray-300">{topic.text}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+
+                                    {/* Column 2: Recommended (Jeju Collections) */}
+                                    <div>
+                                        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-200 mb-4">제주 컬렉션</h3>
+                                        <ul className="space-y-2.5">
+                                            {recommendedTopics.map((topic) => (
+                                                <li key={topic.rank} className="flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 p-1 rounded-md transition-colors">
+                                                    <span className={`font-bold w-4 text-center ${topic.rank <= 3 ? 'text-primary' : 'text-gray-400'}`}>{topic.rank}</span>
+                                                    <span className="text-gray-700 dark:text-gray-300">{topic.text}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 

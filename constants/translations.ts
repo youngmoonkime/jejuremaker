@@ -43,8 +43,19 @@ export const TRANSLATIONS = {
             Medium: '보통',
             Hard: '어려움'
         },
+
         handmade: '핸드메이드',
-        isAi: 'AI 생성'
+        isAi: 'AI 생성',
+        hero: {
+            campaignTag: '이달의 캠페인',
+            participate: '참여하기',
+            learnMore: '자세히 보기',
+            featured: '추천 작품',
+            featuredTitle: '자연의 빛',
+            featuredMaker: 'JejuMaker',
+            title: '폐기물의 재발견. 새로운 가치를 창조하세요.',
+            subtitle: '수천 명의 메이커들과 함께 쓰레기를 보물로 바꿔보세요.'
+        }
     },
     en: {
         title: 'Jeju Re-Maker',
@@ -83,6 +94,16 @@ export const TRANSLATIONS = {
             Hard: 'Hard'
         },
         handmade: 'Handmade',
-        isAi: 'AI Generated'
+        isAi: 'AI Generated',
+        hero: {
+            campaignTag: 'Campaign of the Month',
+            participate: 'Join Now',
+            learnMore: 'Learn More',
+            featured: 'Featured',
+            featuredTitle: "Nature's Light",
+            featuredMaker: 'JejuMaker',
+            title: 'Reimagine Waste. Create Value.',
+            subtitle: 'Join thousands of makers turning trash into treasure.'
+        }
     }
 };
