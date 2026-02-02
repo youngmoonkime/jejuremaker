@@ -29,13 +29,7 @@ import { Language } from '../App';
 // 주의: 실제 프로덕션 환경에서는 이 키들을 환경변수(.env)로 관리하거나 
 // 서버(Supabase Edge Function)에서 서명된 URL을 생성하여 사용하는 것이 보안상 안전합니다.
 import { config } from '../services/config';
-
-// --- Cloudflare R2 Configuration ---
-const R2_ACCOUNT_ID = config.r2.accountId;
-const R2_ACCESS_KEY_ID = config.r2.accessKeyId;
-const R2_SECRET_ACCESS_KEY = config.r2.secretAccessKey;
-const R2_BUCKET_NAME = config.r2.bucketName;
-const R2_PUBLIC_DOMAIN = config.r2.publicDomain;
+import { uploadToR2, isR2Configured as checkR2Config } from '../services/r2Storage';
 
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -211,8 +205,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   // Check R2 Configuration on mount
   useEffect(() => {
-    // Cast to string to prevent TS narrowing to "never" due to const check
-    if ((R2_ACCOUNT_ID as string) !== 'YOUR_R2_ACCOUNT_ID' && !(R2_ACCOUNT_ID as string).includes('YOUR_')) {
+    if (checkR2Config()) {
       setIsR2Configured(true);
     }
   }, []);
@@ -317,150 +310,49 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     setModelFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const uploadToR2 = async (file: File) => {
-    // If keys are not set, return a mock URL for testing
-    if (!isR2Configured) {
-      console.warn("R2 not configured. Returning mock URL for:", file.name);
-      // Simulate upload delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return `https://mock-r2-bucket.com/${file.name}`;
-    }
+  const optimizeImage = (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const MAX_WIDTH = 1920;
 
-    // Simple key generation - in production avoid special chars in filenames
-    const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const key = `models/${Date.now()}_${safeName}`;
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
 
-    try {
-      // Use XMLHttpRequest for direct upload to R2 with signed request
-      // This avoids the AWS SDK fs.readFile issue in browsers
-      const endpoint = `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2_BUCKET_NAME}/${key}`;
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas context failed'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
 
-      // Create AWS Signature V4 for the request
-      const now = new Date();
-      const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
-      const dateStamp = amzDate.slice(0, 8);
-      const region = 'auto';
-      const service = 's3';
-
-      // Create canonical request components
-      const method = 'PUT';
-      const contentType = file.type || 'application/octet-stream';
-
-      // For browser-based upload, use a simpler approach with public bucket
-      // or use a proxy/edge function. Here we'll try direct upload.
-
-      // Read file as ArrayBuffer
-      const arrayBuffer = await file.arrayBuffer();
-
-      // Create a simple hash for content (empty for unsigned payload)
-      const payloadHash = 'UNSIGNED-PAYLOAD';
-
-      // Build headers
-      const headers: Record<string, string> = {
-        'Content-Type': contentType,
-        'x-amz-date': amzDate,
-        'x-amz-content-sha256': payloadHash,
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error('Image compression failed'));
+            return;
+          }
+          // Convert original extension to .webp
+          const fileName = file.name.replace(/\.[^/.]+$/, "") + ".webp";
+          const optimizedFile = new File([blob], fileName, {
+            type: 'image/webp',
+            lastModified: Date.now(),
+          });
+          resolve(optimizedFile);
+        }, 'image/webp', 0.85); // 85% quality
       };
-
-      // Create canonical headers string
-      const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
-      const host = `${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
-      const canonicalHeaders =
-        `content-type:${contentType}\n` +
-        `host:${host}\n` +
-        `x-amz-content-sha256:${payloadHash}\n` +
-        `x-amz-date:${amzDate}\n`;
-
-      // Create canonical request
-      const canonicalUri = `/${R2_BUCKET_NAME}/${key}`;
-      const canonicalQueryString = '';
-      const canonicalRequest = [
-        method,
-        canonicalUri,
-        canonicalQueryString,
-        canonicalHeaders,
-        signedHeaders,
-        payloadHash
-      ].join('\n');
-
-      // Create string to sign
-      const algorithm = 'AWS4-HMAC-SHA256';
-      const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-
-      // Use Web Crypto API for HMAC-SHA256
-      const encoder = new TextEncoder();
-
-      const getSignatureKey = async (key: string, dateStamp: string, regionName: string, serviceName: string) => {
-        const kDate = await crypto.subtle.sign('HMAC',
-          await crypto.subtle.importKey('raw', encoder.encode('AWS4' + key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
-          encoder.encode(dateStamp)
-        );
-        const kRegion = await crypto.subtle.sign('HMAC',
-          await crypto.subtle.importKey('raw', kDate, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
-          encoder.encode(regionName)
-        );
-        const kService = await crypto.subtle.sign('HMAC',
-          await crypto.subtle.importKey('raw', kRegion, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
-          encoder.encode(serviceName)
-        );
-        const kSigning = await crypto.subtle.sign('HMAC',
-          await crypto.subtle.importKey('raw', kService, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
-          encoder.encode('aws4_request')
-        );
-        return kSigning;
-      };
-
-      // Hash the canonical request
-      const canonicalRequestHash = Array.from(
-        new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(canonicalRequest)))
-      ).map(b => b.toString(16).padStart(2, '0')).join('');
-
-      const stringToSign = [
-        algorithm,
-        amzDate,
-        credentialScope,
-        canonicalRequestHash
-      ].join('\n');
-
-      // Calculate signature
-      const signingKey = await getSignatureKey(R2_SECRET_ACCESS_KEY, dateStamp, region, service);
-      const signatureBytes = await crypto.subtle.sign('HMAC',
-        await crypto.subtle.importKey('raw', signingKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
-        encoder.encode(stringToSign)
-      );
-      const signature = Array.from(new Uint8Array(signatureBytes))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-
-      // Create authorization header
-      const authorization = `${algorithm} Credential=${R2_ACCESS_KEY_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-      // Make the request
-      const response = await fetch(`https://${host}${canonicalUri}`, {
-        method: 'PUT',
-        headers: {
-          ...headers,
-          'Authorization': authorization,
-          'Host': host,
-        },
-        body: arrayBuffer
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`R2 upload failed: ${response.status} - ${errorText}`);
-      }
-
-      // Return the public URL
-      const domain = R2_PUBLIC_DOMAIN.endsWith('/') ? R2_PUBLIC_DOMAIN.slice(0, -1) : R2_PUBLIC_DOMAIN;
-      return `${domain}/${key}`;
-    } catch (err: any) {
-      console.error("R2 Upload Error", err);
-      // Alert explicit error to user
-      alert(`${t.alert.r2UploadError} ${err.message}`);
-      // Fallback to avoid breaking the app flow completely
-      return `https://upload-failed.com/${file.name}`;
-    }
+      img.onerror = (error) => reject(error);
+    });
   };
+
+
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -470,28 +362,24 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     const uploadedImageUrls: string[] = [];
 
     try {
-      // 1. Upload ALL Images to Supabase Storage
+      // 1. Optimize and Upload Images to Cloudflare R2
       for (const imageFile of imageFiles) {
-        const fileExt = imageFile.name.split('.').pop() || 'jpg';
-        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${fileExt}`;
-
         try {
-          const { data: imageData, error: imageError } = await supabase.storage
-            .from('item-images')
-            .upload(fileName, imageFile);
+          console.log(`Optimizing image: ${imageFile.name}...`);
+          const optimizedFile = await optimizeImage(imageFile);
+          console.log(`Uploading optimized image (${(optimizedFile.size / 1024).toFixed(2)}KB) to R2...`);
 
-          if (imageError) throw imageError;
-
-          const { data: publicUrlData } = supabase.storage
-            .from('item-images')
-            .getPublicUrl(fileName);
-
-          uploadedImageUrls.push(publicUrlData.publicUrl);
-        } catch (storageError: any) {
-          console.warn(`Storage upload failed for ${imageFile.name}:`, storageError.message);
-
-          // Use fallback image for failed uploads
-          uploadedImageUrls.push('https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80');
+          const url = await uploadToR2(optimizedFile, 'images');
+          uploadedImageUrls.push(url);
+        } catch (err: any) {
+          console.error(`Failed to process image ${imageFile.name}:`, err);
+          // Fallback to uploading original if optimization fails, or just warn
+          try {
+            const url = await uploadToR2(imageFile, 'images');
+            uploadedImageUrls.push(url);
+          } catch (fallbackErr) {
+            console.error("Fallback upload also failed", fallbackErr);
+          }
         }
       }
 
@@ -505,7 +393,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         }
 
         for (const file of modelFiles) {
-          const url = await uploadToR2(file);
+          const url = await uploadToR2(file, 'models');
           uploadedModels.push({
             name: file.name,
             size: file.size,

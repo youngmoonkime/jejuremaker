@@ -161,10 +161,16 @@ const Header: React.FC<HeaderProps> = ({
                         <div className="relative">
                             <div
                                 onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                                className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group"
+                                className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group flex items-center justify-center"
                                 title={t.logout}
                             >
-                                <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs" alt="User" className="w-full h-full object-cover" />
+                                {user.user_metadata?.avatar_url ? (
+                                    <img src={user.user_metadata.avatar_url} alt="User" className="w-full h-full object-cover" />
+                                ) : (
+                                    <span className="text-white font-bold text-sm">
+                                        {(user.user_metadata?.full_name || user.email || 'U').charAt(0).toUpperCase()}
+                                    </span>
+                                )}
                             </div>
 
                             {showProfileDropdown && (
@@ -203,7 +209,7 @@ const Header: React.FC<HeaderProps> = ({
                     )}
                 </div>
             </div>
-        </header>
+        </header >
     );
 };
 

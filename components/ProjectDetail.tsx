@@ -1,8 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Language } from '../App';
 import { Project } from '../types';
-import { User } from '@supabase/supabase-js';
-import ThreeDViewer from './ThreeDViewer';
+import { User, createClient } from '@supabase/supabase-js';
+import ThreeDViewer, { ThreeDViewerHandle } from './ThreeDViewer';
+import CopilotPanel from './CopilotPanel';
+import { config } from '../services/config';
+import * as aiService from '../services/aiService';
+
+// Helper: Base64 to Blob
+const base64ToBlob = (base64: string, mimeType: string) => {
+  const byteCharacters = atob(base64.split(',')[1]);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  return new Blob([byteArray], { type: mimeType });
+};
 
 interface ProjectDetailProps {
   onBack: () => void;
@@ -101,21 +115,156 @@ const TRANSLATIONS = {
 
 type ViewMode = 'default' | '3d' | 'blueprint';
 
-const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project, user, onLoginClick, onNavigate, onLikeToggle, onViewIncrement, likedProjects }) => {
+const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, onOpenWorkspace, language, project, user, onLoginClick, onNavigate, onLikeToggle, onViewIncrement, likedProjects }) => {
   const t = TRANSLATIONS[language];
   const [viewMode, setViewMode] = useState<ViewMode>('default');
   const [showFileList, setShowFileList] = useState(false);
+  const [syncedMetadata, setSyncedMetadata] = useState<any>(null); // State for fresh metadata
 
-  // Increment view count when project is loaded
+  // --- AI Copilot State ---
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+  const [copilotLoading, setCopilotLoading] = useState(false);
+  const [copilotMessages, setCopilotMessages] = useState<{ role: 'user' | 'assistant'; content: string; type?: 'text' | 'preview' | 'action'; meta?: any }[]>([]);
+  const viewerRef = useRef<ThreeDViewerHandle>(null);
+
+  // State for "Recipe Mode" (Current Prompt)
+  const [currentRecipe, setCurrentRecipe] = useState(project?.description || "A 3D model");
+
+  // Helper: Upload Logic
+  const uploadToR2 = async (file: Blob, path: string) => {
+    // Create a fresh client for this operation
+    const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
+    // 1. Get Presigned URL
+    const { data, error } = await supabase.functions.invoke('upload-r2', {
+      body: {
+        key: path,
+        contentType: file.type,
+        action: 'put'
+      }
+    });
+    if (error || !data?.url) throw new Error('Failed to get upload URL');
+
+    // 2. Upload to R2
+    await fetch(data.url, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': file.type }
+    });
+
+    // 3. Return Public URL
+    return `${config.r2.publicDomain}/${path}`;
+  };
+
+  const handleCopilotMessage = async (msg: string) => {
+    const newMessages = [...copilotMessages, { role: 'user', content: msg } as const];
+    setCopilotMessages(newMessages);
+    setCopilotLoading(true);
+
+    try {
+      // 1. Analyze Intent
+      const analysis = await aiService.analyzeCopilotIntent(msg, currentRecipe);
+      console.log("Copilot Intent:", analysis);
+
+      // 2. Handle Actions
+      if (analysis.type === 'VIEW_CONTROL') {
+        if (analysis.action?.includes('rotate')) viewerRef.current?.rotateModel(0, Math.PI / 4);
+        if (analysis.action === 'wireframe_on') viewerRef.current?.setWireframe(true);
+        if (analysis.action === 'wireframe_off') viewerRef.current?.setWireframe(false);
+        if (analysis.action === 'bg_black') viewerRef.current?.setBackground('#000000');
+        if (analysis.action === 'bg_white') viewerRef.current?.setBackground('#ffffff');
+
+        setCopilotMessages(prev => [...prev, { role: 'assistant', content: analysis.message }]);
+
+      } else if (analysis.type === 'UPDATE_RECIPE') {
+        if (analysis.recipe_update) {
+          setCurrentRecipe(analysis.recipe_update);
+          console.log("Recipe Updated:", analysis.recipe_update);
+        }
+        setCopilotMessages(prev => [...prev, { role: 'assistant', content: analysis.message }]);
+
+      } else if (analysis.type === 'GENERATE') {
+        setCopilotMessages(prev => [...prev, { role: 'assistant', content: "네, 새로운 디자인으로 3D 모델 생성을 시작합니다..." }]);
+
+        // 1. Call Tripo
+        const tripoUrl = await aiService.generate3DModel(currentRecipe);
+
+        // 2. Download via Proxy (CORS Bypass)
+        const baseUrl = import.meta.env.DEV ? 'https://jejuremaker.pages.dev' : '';
+        const proxyUrl = `${baseUrl}/api/tripo-proxy?url=${encodeURIComponent(tripoUrl)}`;
+        const proxyResp = await fetch(proxyUrl);
+        const blob = await proxyResp.blob();
+
+        // 3. Upload to R2
+        const fileName = `copilot_gen_${Date.now()}.glb`;
+        const r2Path = `models/${user?.id || 'anon'}/${fileName}`;
+        const r2Url = await uploadToR2(blob, r2Path);
+
+        // 4. Update View
+        // Hack: Update syncedMetadata locally to force re-render of 3D Viewer
+        setSyncedMetadata({ ...syncedMetadata, model_3d_url: r2Url });
+
+        // 5. Success Message
+        setCopilotMessages(prev => [...prev, { role: 'assistant', content: "생성이 완료되었습니다! 화면을 확인해보세요." }]);
+      } else {
+        // CHAT
+        setCopilotMessages(prev => [...prev, { role: 'assistant', content: analysis.message }]);
+      }
+
+    } catch (error) {
+      console.error(error);
+      setCopilotMessages(prev => [...prev, { role: 'assistant', content: "오류가 발생했습니다. 잠시 후 다시 시도해주세요." }]);
+    } finally {
+      setCopilotLoading(false);
+    }
+  };
+
+
+  // Increment view count when project is loaded AND fetch latest metadata
   useEffect(() => {
     if (project?.id) {
       onViewIncrement(project.id);
+
+      // AI 프로젝트라면 Copilot 자동 활성화 안내 (옵션)
+      if (project.isAiRemix || project.isAiIdea) {
+        // setIsCopilotOpen(true); // 너무 공격적일 수 있으니 보류
+      }
+
+      // Fetch latest metadata to ensure 3D URL is up to date (sync with Wizard generation)
+      const fetchLatestData = async () => {
+        try {
+          // If the project ID is numeric (legacy), skip. If UUID, fetch.
+          if (typeof project.id === 'string' && project.id.includes('-')) {
+            const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+            const { data, error } = await supabase
+              .from('items')
+              .select('metadata')
+              .eq('id', project.id)
+              .single();
+
+            if (data && !error && data.metadata) {
+              setSyncedMetadata(data.metadata);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to sync project metadata", e);
+        }
+      };
+
+      fetchLatestData();
     }
   }, [project?.id]);
 
   const handleToolClick = (mode: ViewMode) => {
     setViewMode(mode === viewMode ? 'default' : mode);
   };
+
+  // Update view mode to 3D if Copilot is opened
+  useEffect(() => {
+    if (isCopilotOpen && viewMode !== '3d') {
+      setViewMode('3d');
+    }
+  }, [isCopilotOpen]);
 
   const handleDownload = () => {
     if (!user) {
@@ -158,6 +307,11 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
   };
 
   const handleConnectMaker = () => {
+    if (project?.isAiRemix || project?.isAiIdea) {
+      onOpenWorkspace();
+      return;
+    }
+
     if (user) {
       // User is logged in, go to workspace
       onNavigate('workspace');
@@ -165,15 +319,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
       // User not logged in, show auth modal then go to workspace
       onLoginClick('workspace');
     }
-  }
+  };
 
   // Determine what content to show
   const displayTitle = project?.title || t.title;
   const displayDesc = project?.description || t.description;
   const displayImage = project?.image || 'https://lh3.googleusercontent.com/aida-public/AB6AXuDfv7rlXQezFNRd55ViDyVQxZHy5hmFeJRXuYnIhyBrqgo6LsrhVYeZKMz0Mhkh3SM8YgXWYE8qI8_RMrYNIAEJKuWxoO9Wo2s-xMLQKI7o6W0Jfaw_ASJFO3TLZHM35y9JiY1bjQqF-zcsSKoVkW980qHM3rsSDBkRaH6xYmQehOScGrNFCt7L78QxSK__Ljxwcv05op5YxYRS3fRAQLmMyiiiQ5-rMV71Mh-zSiVnCOO856cB0S6IrvFPabp6DIRjOMalBsw9bno';
 
-  // Get Blueprint URL
-  const blueprintUrl = (project as any)?.metadata?.blueprint_url;
+  // Get Blueprint URL - Use synced data if available
+  const blueprintUrl = syncedMetadata?.blueprint_url || (project as any)?.metadata?.blueprint_url;
 
   // Update displayImages to include blueprint if available
   const notebookImages = project?.images || [displayImage];
@@ -188,10 +342,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
   // Check if project is AI generated
   const isAiProject = project?.isAiRemix || project?.isAiIdea;
 
-  // 3D 모델 파일 찾기
+  // 3D 모델 파일 찾기 - Use synced data if available
   const getModel3DUrl = (): string | null => {
+    // 0. Synced metadata from DB (Highest priority for fresh Wizard generation)
+    if (syncedMetadata?.model_3d_url) {
+      return syncedMetadata.model_3d_url;
+    }
+
     // 1. 먼저 metadata.model_3d_url 확인 (AI 생성 프로젝트)
-    const metadataUrl = (project as any)?.metadata?.model_3d_url;
+    const metadataUrl = (project as any)?.metadata?.model_3d_url || (project as any)?.metadata?.model_url;
     if (metadataUrl) {
       return metadataUrl;
     }
@@ -225,7 +384,18 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
 
   return (
     <>
-      <div className="max-w-7xl mx-auto py-12">
+      <div className="max-w-7xl mx-auto py-12 relative">
+        {/* Copilot Panel Integration */}
+        {isCopilotOpen && (
+          <CopilotPanel
+            isOpen={isCopilotOpen}
+            onClose={() => setIsCopilotOpen(false)}
+            messages={copilotMessages}
+            onSendMessage={handleCopilotMessage}
+            isLoading={copilotLoading}
+          />
+        )}
+
         {/* Back Button - Adding it here since nav is removed */}
         <button onClick={onBack} className="flex items-center space-x-2 text-gray-500 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors group mb-6 px-6 lg:px-0">
           <span className="material-icons-round text-xl group-hover:-translate-x-1 transition-transform">chevron_left</span>
@@ -241,7 +411,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
               {viewMode === '3d' ? (
                 <div className="w-full h-full bg-[#111111] relative overflow-hidden">
                   {model3DUrl ? (
-                    <ThreeDViewer modelUrl={model3DUrl} className="w-full h-full" />
+                    <ThreeDViewer ref={viewerRef} modelUrl={model3DUrl} className="w-full h-full" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <p className="text-white/50 text-sm">3D 모델 파일이 없습니다</p>
@@ -521,6 +691,17 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ onBack, language, project
             ))}
           </div>
         </div >
+
+        {/* Floating Action Button for AI Copilot */}
+        {(project?.isAiRemix || project?.isAiIdea) && (
+          <button
+            onClick={onOpenWorkspace}
+            className="fixed bottom-8 right-8 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110 z-40 animate-bounce-slow"
+            aria-label="Open AI Workspace"
+          >
+            <span className="material-icons-round text-2xl">smart_toy</span>
+          </button>
+        )}
 
         {/* Footer simple */}
         < footer className="mt-24 pt-12 border-t border-gray-200 dark:border-gray-800 flex flex-col items-center" >

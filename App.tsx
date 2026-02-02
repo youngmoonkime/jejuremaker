@@ -58,9 +58,11 @@ const App: React.FC = () => {
           likes: 0,
           views: 0,
           // Use a consistent avatar for 'Master Kim', or a random one for others if not available
-          avatar: makerName === 'Master Kim'
-            ? 'https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs'
-            : 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'
+          avatar: (user && (makerName === user.user_metadata?.full_name || makerName === user.email))
+            ? (user.user_metadata?.avatar_url || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y')
+            : (makerName === 'Master Kim'
+              ? 'https://lh3.googleusercontent.com/aida-public/AB6AXuAQyyDiuuKUO7-48MXIFPjnexxedhZVHEg5bLuAfgHROaZsbytCEGez7ZIXFwYjO7H0n-l9dOkw4COHYrcofMglRTN3eCjKz9imRZERODcpiZMHvmA375rRKibsmRiaev4dbcIfJShQP2b6z5fq637Tc09U2y5H0qaavl6DdKbBt-tQj5H3OY3EjQDJEpKoEstwMBcTO32zdio882CcbV9WotiISEBt_WQls7w_h3eoXRbVzBGRCA7ziLjSCfksoUdmw3FLUHE6mDs'
+              : 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y')
         };
       }
       makerStats[makerName].projects += 1;
@@ -126,6 +128,7 @@ const App: React.FC = () => {
         const { data, error } = await supabase
           .from('items')
           .select('*')
+          .neq('category', 'Social') // Exclude community posts from main feed
           .order('created_at', { ascending: false });
 
         if (error) {
@@ -137,7 +140,7 @@ const App: React.FC = () => {
           const mappedProjects: Project[] = data.map((item: any) => ({
             id: item.id.toString(),
             title: item.title,
-            maker: item.metadata?.maker_name || 'Master Kim',
+            maker: item.maker || item.metadata?.maker_name || 'Master Kim',
             image: item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80', // Fallback for missing images
             images: item.metadata?.images || [], // 여러 이미지 지원
             category: item.category,
@@ -147,9 +150,9 @@ const App: React.FC = () => {
             description: item.metadata?.description || item.description || (item.title + ' - Custom project'),
             steps: item.metadata?.fabrication_guide || [],
             downloadUrl: item.metadata?.download_url || '', // Map the download link
-            // metadata.model_3d_url이 있으면 modelFiles에 추가
-            modelFiles: item.metadata?.model_3d_url
-              ? [{ name: '3d_model.glb', type: 'glb', size: 0, url: item.metadata.model_3d_url }, ...(item.metadata?.model_files || [])]
+            // metadata.model_3d_url이 있으면 modelFiles에 추가. fallback: model_url
+            modelFiles: (item.metadata?.model_3d_url || item.metadata?.model_url)
+              ? [{ name: '3d_model.glb', type: 'glb', size: 0, url: (item.metadata.model_3d_url || item.metadata.model_url) }, ...(item.metadata?.model_files || [])]
               : (item.metadata?.model_files || []),
             isPublic: item.is_public ?? true, // Default to public for existing items
             ownerId: item.owner_id,
@@ -205,68 +208,81 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, [authTargetView]);
 
-  // Fetch user's private projects
+  // Extracted fetch function
+  const fetchMyProjects = async () => {
+    console.log('=== fetchMyProjects called ===');
+    console.log('User:', user?.id);
+
+    if (!user) {
+      console.log('No user, clearing myProjects');
+      setMyProjects([]);
+      return;
+    }
+
+    try {
+      console.log('Fetching projects for user:', user.id);
+      const { data, error } = await supabase
+        .from('items')
+        .select('*')
+        .eq('owner_id', user.id)
+        .order('created_at', { ascending: false });
+
+      console.log('Supabase response - data:', data, 'error:', error);
+
+      if (error) {
+        console.error('Supabase error fetching projects:', error);
+        throw error;
+      }
+
+      if (data) {
+        console.log('Found', data.length, 'projects');
+        const mappedProjects: Project[] = data.map((item: any) => ({
+          id: item.id.toString(),
+          title: item.title,
+          maker: user.email || 'Me',
+          image: item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80',
+          images: item.metadata?.images || [],
+          category: item.category,
+          time: item.estimated_time || '2h',
+          difficulty: (item.difficulty as 'Easy' | 'Medium' | 'Hard') || 'Medium',
+          isAiRemix: item.is_ai_generated,
+          description: item.title + ' - Custom project',
+          steps: item.metadata?.fabrication_guide || [],
+          downloadUrl: item.metadata?.download_url || '',
+          modelFiles: (item.metadata?.model_3d_url || item.metadata?.model_url)
+            ? [{ name: '3d_model.glb', type: 'glb', size: 0, url: (item.metadata.model_3d_url || item.metadata.model_url) }, ...(item.metadata?.model_files || [])]
+            : (item.metadata?.model_files || []),
+          isPublic: item.is_public ?? false,
+          ownerId: item.owner_id,
+          likes: item.likes || 0,
+          views: item.views || 0,
+          createdAt: item.created_at
+        }));
+
+        console.log('Setting myProjects:', mappedProjects);
+        setMyProjects(mappedProjects);
+      }
+    } catch (error) {
+      console.error('Failed to fetch my projects:', error);
+    }
+  };
+
   useEffect(() => {
-    const fetchMyProjects = async () => {
-      console.log('=== fetchMyProjects called ===');
-      console.log('User:', user?.id);
-
-      if (!user) {
-        console.log('No user, clearing myProjects');
-        setMyProjects([]);
-        return;
-      }
-
-      try {
-        console.log('Fetching projects for user:', user.id);
-        const { data, error } = await supabase
-          .from('items')
-          .select('*')
-          .eq('owner_id', user.id)
-          .order('created_at', { ascending: false });
-
-        console.log('Supabase response - data:', data, 'error:', error);
-
-        if (error) {
-          console.error('Supabase error fetching projects:', error);
-          throw error;
-        }
-
-        if (data) {
-          console.log('Found', data.length, 'projects');
-          const mappedProjects: Project[] = data.map((item: any) => ({
-            id: item.id.toString(),
-            title: item.title,
-            maker: user.email || 'Me',
-            image: item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80',
-            images: item.metadata?.images || [],
-            category: item.category,
-            time: item.estimated_time || '2h',
-            difficulty: (item.difficulty as 'Easy' | 'Medium' | 'Hard') || 'Medium',
-            isAiRemix: item.is_ai_generated,
-            description: item.title + ' - Custom project',
-            steps: item.metadata?.fabrication_guide || [],
-            downloadUrl: item.metadata?.download_url || '',
-            modelFiles: item.metadata?.model_3d_url
-              ? [{ name: '3d_model.glb', type: 'glb', size: 0, url: item.metadata.model_3d_url }, ...(item.metadata?.model_files || [])]
-              : (item.metadata?.model_files || []),
-            isPublic: item.is_public ?? false,
-            ownerId: item.owner_id,
-            likes: item.likes || 0,
-            views: item.views || 0,
-            createdAt: item.created_at
-          }));
-
-          console.log('Setting myProjects:', mappedProjects);
-          setMyProjects(mappedProjects);
-        }
-      } catch (error) {
-        console.error('Failed to fetch my projects:', error);
-      }
-    };
-
     fetchMyProjects();
   }, [user]);
+
+  const handleAddProject = (newProject: Project) => {
+    console.log('App: handleAddProject called with:', newProject);
+
+    // 1. Optimistic Update
+    setMyProjects(prev => [newProject, ...prev]);
+
+    // 2. Background Refresh to ensure consistency
+    setTimeout(() => {
+      console.log('App: Refreshing projects from DB...');
+      fetchMyProjects();
+    }, 1000);
+  };
 
   // Fetch and manage user tokens from database
   useEffect(() => {
@@ -472,10 +488,7 @@ const App: React.FC = () => {
     setCurrentView('discovery');
   };
 
-  const handleAddProject = (newProject: Project) => {
-    // Add to user's private library
-    setMyProjects(prev => [newProject, ...prev]);
-  };
+
 
   // Update tokens with database sync
   const updateUserTokens = async (newTokenCount: number) => {
@@ -622,6 +635,7 @@ const App: React.FC = () => {
         const isAi = !!(selectedProject?.isAiRemix || selectedProject?.isAiIdea);
         return (
           <Workspace
+            project={selectedProject!}
             onExit={() => setCurrentView('detail')}
             language={language}
             userTokens={userTokens}

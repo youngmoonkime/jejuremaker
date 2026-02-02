@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Project } from '../types';
 import { Language } from '../App';
-import { User } from '@supabase/supabase-js';
+import { User, createClient } from '@supabase/supabase-js';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { uploadToR2 } from '../services/r2Storage';
+import { config } from '../services/config';
 
 interface ProfileProps {
     onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community' | 'profile') => void;
@@ -24,52 +27,161 @@ const TRANSLATIONS = {
         title: '내 정보',
         myLibrary: '내 서재',
         tokens: '보유 토큰',
-        noProjects: '아직 프로젝트가 없습니다',
-        createFirst: 'AI 분석으로 첫 프로젝트를 만들어보세요!',
+        noProjects: '새로운 프로젝트를 시작해보세요',
+        createFirst: '+',
         publish: '공개하기',
         delete: '삭제',
         published: '공개됨',
         private: '비공개',
-        backToDiscovery: '탐색으로 돌아가기',
+        backToDiscovery: '돌아가기',
         confirmDelete: '정말 삭제하시겠습니까?',
-        confirmPublish: '이 프로젝트를 공개하시겠습니까?',
-        difficulty: {
-            Easy: '쉬움',
-            Medium: '보통',
-            Hard: '어려움'
-        }
+        confirmPublish: '이 프로젝트를 커뮤니티에 공개하시겠습니까?',
+        editProfile: '프로필 수정',
+        save: '저장',
+        cancel: '취소',
+        changePhoto: '사진 변경',
+        uploading: '업로드 중...',
+        logout: '로그아웃'
     },
     en: {
         title: 'My Profile',
-        myLibrary: 'My Library',
+        myLibrary: 'Library',
         tokens: 'Tokens',
-        noProjects: 'No projects yet',
-        createFirst: 'Create your first project with AI analysis!',
+        noProjects: 'Start a new project',
+        createFirst: '+',
         publish: 'Publish',
         delete: 'Delete',
-        published: 'Published',
+        published: 'Public',
         private: 'Private',
-        backToDiscovery: 'Back to Discovery',
+        backToDiscovery: 'Back',
         confirmDelete: 'Are you sure you want to delete this project?',
         confirmPublish: 'Publish this project to the community?',
-        difficulty: {
-            Easy: 'Easy',
-            Medium: 'Medium',
-            Hard: 'Hard'
-        }
+        editProfile: 'Edit Profile',
+        save: 'Save',
+        cancel: 'Cancel',
+        changePhoto: 'Change Photo',
+        uploading: 'Uploading...',
+        logout: 'Log Out'
     }
 };
+
+const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 
 const Profile: React.FC<ProfileProps> = ({
     onNavigate,
     onProjectSelect,
+    isDarkMode,
     language,
+    user,
+    onLogout,
     userTokens,
     myProjects,
     onPublish,
     onDelete
 }) => {
     const t = TRANSLATIONS[language];
+
+    // Edit Mode State
+    const [isEditing, setIsEditing] = useState(false);
+    const [displayName, setDisplayName] = useState(user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Maker');
+    const [avatarUrl, setAvatarUrl] = useState(user?.user_metadata?.avatar_url || '');
+    const [isUploading, setIsUploading] = useState(false);
+
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Sync state with user prop
+    useEffect(() => {
+        if (user) {
+            setDisplayName(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
+            setAvatarUrl(user.user_metadata?.avatar_url || '');
+        }
+    }, [user]);
+
+    const handleAvatarClick = () => {
+        if (isEditing) {
+            fileInputRef.current?.click();
+        }
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsUploading(true);
+        try {
+            const url = await uploadToR2(file, 'avatars');
+            setAvatarUrl(url);
+        } catch (error) {
+            console.error('Failed to upload avatar:', error);
+            alert('Failed to upload image. Please try again.');
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleSaveProfile = async () => {
+        if (!user) return;
+
+        try {
+            // 1. Update Auth User Metadata
+            const { error: authError } = await supabase.auth.updateUser({
+                data: {
+                    full_name: displayName, // Store "Nickname" as full_name
+                    avatar_url: avatarUrl
+                }
+            });
+
+            if (authError) throw authError;
+
+            // 2. Sync changes to all historical posts in 'items' table
+            // We need to update 'maker' column and 'metadata.maker_avatar_url'
+            // Since we can't easily partial update JSONB for all rows without a function,
+            // we will primarily update the 'maker' column which is the source of truth for name.
+            // For avatar, we will attempt to update it if the column exists or in metadata.
+
+            // Fetch all items by this user to update their metadata efficiently
+            const { data: userItems, error: fetchError } = await supabase
+                .from('items')
+                .select('id, metadata')
+                .eq('owner_id', user.id);
+
+            if (!fetchError && userItems) {
+                const updates = userItems.map(item => ({
+                    id: item.id,
+                    maker: displayName, // Update top-level maker column
+                    metadata: {
+                        ...item.metadata,
+                        maker_avatar_url: avatarUrl // Sync avatar to metadata
+                    }
+                }));
+
+                // Batch execute updates? Supabase JS doesn't support bulk update with different values easily yet.
+                // But here all values are the same (except preserving existing metadata).
+                // Actually, we can use a loop or Promise.all. For 100 items it's fine.
+                // Optimization: We can just run one UPDATE query if we don't care about preserving *unique* unknown metadata keys,
+                // BUT we DO care. So we must preserve existing metadata.
+
+                // Better approach: Use SQL function or just loop. 
+                // Let's loop for now, it's safer for preserving data integrity.
+                await Promise.all(updates.map(update =>
+                    supabase
+                        .from('items')
+                        .update({
+                            maker: update.maker,
+                            metadata: update.metadata
+                        })
+                        .eq('id', update.id)
+                ));
+            }
+
+            setIsEditing(false);
+            // Optional: Force reload or notify parent to refresh
+            window.location.reload(); // Simple way to refresh all components with new data
+        } catch (error) {
+            console.error('Failed to update profile:', error);
+            alert('Failed to save profile. Please try again.');
+        }
+    };
 
     const handlePublish = (projectId: string) => {
         if (window.confirm(t.confirmPublish)) {
@@ -84,132 +196,193 @@ const Profile: React.FC<ProfileProps> = ({
     };
 
     return (
-        <div>
-            {/* Back Button */}
-            <button
-                onClick={() => onNavigate('discovery')}
-                className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary mb-6 transition-colors"
-            >
-                <span className="material-icons-round">arrow_back</span>
-                <span className="font-medium">{t.backToDiscovery}</span>
-            </button>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-fade-in-up">
+            {/* Minimal Header with Back Navigation */}
+            <div className="flex justify-between items-center mb-12">
+                <button
+                    onClick={() => onNavigate('discovery')}
+                    className="group flex items-center gap-2 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
+                >
+                    <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
+                        <span className="material-icons-round text-sm">arrow_back</span>
+                    </div>
+                    <span className="font-medium text-sm">{t.backToDiscovery}</span>
+                </button>
 
-            {/* Profile Header */}
-            <div className="mb-8">
-                <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">{t.title}</h1>
-                <div className="flex items-center gap-6 text-gray-600 dark:text-gray-400">
-                    <div className="flex items-center gap-2">
-                        <span className="material-icons-round text-primary">folder</span>
-                        <span className="font-medium">{myProjects.length} {language === 'ko' ? '프로젝트' : 'Projects'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-lg">💎</span>
-                        <span className="font-medium">{userTokens} {t.tokens}</span>
-                    </div>
-                </div>
+                <button
+                    onClick={onLogout}
+                    className="text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
+                >
+                    {t.logout}
+                </button>
             </div>
 
-            {/* My Library Section */}
-            <div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">{t.myLibrary}</h2>
+            {/* Apple-style Identity Card */}
+            <div className="flex flex-col items-center mb-16 relative">
+                <div className="relative group">
+                    <div
+                        className={`w-32 h-32 rounded-full overflow-hidden border-4 border-white dark:border-gray-900 shadow-2xl ${isEditing ? 'cursor-pointer ring-4 ring-blue-500/30' : ''}`}
+                        onClick={handleAvatarClick}
+                    >
+                        {avatarUrl ? (
+                            <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                        ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl text-white font-bold">
+                                {displayName.charAt(0).toUpperCase()}
+                            </div>
+                        )}
 
-                {myProjects.length === 0 ? (
-                    <div className="text-center py-20">
-                        <div className="w-24 h-24 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <span className="material-icons-round text-5xl text-gray-400">inventory_2</span>
-                        </div>
-                        <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">{t.noProjects}</h3>
-                        <p className="text-gray-500 dark:text-gray-400 mb-6">{t.createFirst}</p>
-                        <button
-                            onClick={() => onNavigate('discovery')}
-                            className="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-xl font-medium transition-colors shadow-lg shadow-primary/20"
-                        >
-                            {language === 'ko' ? 'AI 분석 시작하기' : 'Start AI Analysis'}
-                        </button>
+                        {/* Edit Overlay */}
+                        {isEditing && (
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px] transition-opacity">
+                                <span className="material-icons-round text-white text-3xl">camera_alt</span>
+                            </div>
+                        )}
                     </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-                        {myProjects.map((project) => (
+
+                    {/* Status Indicator */}
+                    {!isEditing && (
+                        <button
+                            onClick={() => setIsEditing(true)}
+                            className="absolute bottom-1 right-1 w-8 h-8 bg-black dark:bg-white rounded-full flex items-center justify-center text-white dark:text-black shadow-lg hover:scale-110 transition-transform"
+                        >
+                            <span className="material-icons-round text-sm">edit</span>
+                        </button>
+                    )}
+                </div>
+
+                <div className="mt-6 text-center">
+                    {isEditing ? (
+                        <div className="flex flex-col items-center gap-4 animate-fade-in">
+                            <input
+                                type="text"
+                                value={displayName}
+                                onChange={(e) => setDisplayName(e.target.value)}
+                                className="text-3xl font-bold text-center bg-transparent border-b-2 border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:outline-none pb-1 w-64 text-gray-900 dark:text-white"
+                                placeholder="Nickname"
+                                autoFocus
+                            />
+                            <div className="flex gap-3 mt-2">
+                                <button
+                                    onClick={() => {
+                                        setIsEditing(false);
+                                        setDisplayName(user?.user_metadata?.full_name || 'Maker');
+                                    }}
+                                    className="px-6 py-2 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-medium text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                    {t.cancel}
+                                </button>
+                                <button
+                                    onClick={handleSaveProfile}
+                                    disabled={isUploading || !displayName.trim()}
+                                    className="px-6 py-2 rounded-full bg-black dark:bg-white text-white dark:text-black font-medium text-sm hover:scale-105 active:scale-95 transition-all shadow-lg"
+                                >
+                                    {isUploading ? t.uploading : t.save}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="animate-fade-in">
+                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{displayName}</h1>
+                            <div className="flex items-center justify-center gap-6 text-gray-500 dark:text-gray-400 text-sm font-medium">
+                                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                    {userTokens} Tokens
+                                </span>
+                                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                    {myProjects.length} Projects
+                                </span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                />
+            </div>
+
+            {/* Content Divider */}
+            <div className="w-full border-t border-gray-100 dark:border-gray-800 mb-12"></div>
+
+            {/* Minimal Library Grid */}
+            <div>
+                <div className="flex items-baseline justify-between mb-8">
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{t.myLibrary}</h2>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                    {/* Add New Project Card */}
+                    <button
+                        onClick={() => onNavigate('discovery')}
+                        className="group aspect-square rounded-3xl bg-gray-50 dark:bg-gray-800/50 border-2 border-dashed border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-all duration-300"
+                    >
+                        <div className="w-12 h-12 rounded-full bg-white dark:bg-gray-700 shadow-sm flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <span className="material-icons-round text-2xl text-gray-400 dark:text-gray-300 group-hover:text-primary">add</span>
+                        </div>
+                        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">New Project</span>
+                    </button>
+
+                    {/* Project Items */}
+                    {myProjects.map((project) => (
+                        <div key={project.id} className="group relative aspect-square">
                             <div
-                                key={project.id}
-                                className="group flex flex-col gap-3"
+                                className="w-full h-full rounded-3xl overflow-hidden bg-gray-100 dark:bg-gray-800 shadow-sm transition-all duration-500 hover:shadow-xl cursor-pointer"
+                                onClick={() => onProjectSelect(project)}
                             >
-                                <div className="relative aspect-[4/3] rounded-3xl overflow-hidden bg-gray-100 dark:bg-gray-800 shadow-sm group-hover:shadow-xl transition-all duration-300">
-                                    <img
-                                        src={project.image}
-                                        alt={project.title}
-                                        className="w-full h-full object-cover cursor-pointer transition-transform duration-500 group-hover:scale-110"
-                                        onClick={() => onProjectSelect(project)}
-                                    />
+                                <img
+                                    src={getOptimizedImageUrl(project.image, 400)}
+                                    alt={project.title}
+                                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                                    loading="lazy"
+                                />
 
-                                    {/* Public/Private Badge */}
-                                    <div className={`absolute top-3 left-3 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 shadow-sm border ${project.isPublic
-                                        ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800'
-                                        : 'bg-gray-100 dark:bg-gray-800/90 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
-                                        }`}>
-                                        <span className="material-icons-round text-sm">{project.isPublic ? 'public' : 'lock'}</span>
-                                        {project.isPublic ? t.published : t.private}
-                                    </div>
-
-                                    {(project.isAiRemix || project.isAiIdea) && (
-                                        <div className="absolute top-3 right-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs font-bold text-primary flex items-center gap-1 shadow-sm border border-white/50 dark:border-gray-700">
-                                            <span className="material-icons-round text-sm">auto_awesome</span>
-                                            AI
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="px-1">
-                                    <div className="flex justify-between items-start mb-1">
-                                        <h3
-                                            className="font-bold text-lg text-gray-900 dark:text-gray-100 leading-snug cursor-pointer hover:text-primary transition-colors"
-                                            onClick={() => onProjectSelect(project)}
-                                        >
-                                            {project.title}
-                                        </h3>
-                                        <span className={`text-xs px-2.5 py-1 rounded-md font-medium border
-                    ${project.difficulty === 'Easy' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-100 dark:border-green-800' :
-                                                project.difficulty === 'Medium' ? 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 border-yellow-100 dark:border-yellow-800' :
-                                                    'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-100 dark:border-red-800'}`}>
-                                            {t.difficulty[project.difficulty]}
-                                        </span>
-                                    </div>
-
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-                                            <span className="material-icons-round text-sm">category</span>
-                                            {project.category}
-                                        </div>
-                                        <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-                                            <span className="material-icons-round text-sm">schedule</span>
-                                            {project.time}
-                                        </div>
-                                    </div>
-
-                                    {/* Action Buttons */}
-                                    <div className="flex gap-2">
-                                        {!project.isPublic && (
-                                            <button
-                                                onClick={() => handlePublish(project.id)}
-                                                className="flex-1 px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-xl text-sm font-medium transition-colors shadow-md shadow-primary/20 flex items-center justify-center gap-1"
-                                            >
-                                                <span className="material-icons-round text-sm">public</span>
-                                                {t.publish}
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={() => handleDelete(project.id)}
-                                            className="px-4 py-2 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-xl text-sm font-medium transition-colors border border-red-100 dark:border-red-800 flex items-center justify-center gap-1"
-                                        >
-                                            <span className="material-icons-round text-sm">delete</span>
-                                            {t.delete}
-                                        </button>
-                                    </div>
+                                {/* Hover Overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-5">
+                                    <h3 className="text-white font-bold truncate text-lg">{project.title}</h3>
+                                    <p className="text-white/80 text-xs">{project.category} • {project.time}</p>
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                )}
+
+                            {/* Minimal Action Menu (Visible on Hover/Edit) */}
+                            <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-2 group-hover:translate-y-0">
+                                {!project.isPublic && (
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handlePublish(project.id); }}
+                                        className="w-8 h-8 rounded-full bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm flex items-center justify-center text-black dark:text-white shadow-lg hover:bg-green-500 hover:text-white transition-colors"
+                                        title={t.publish}
+                                    >
+                                        <span className="material-icons-round text-sm">public</span>
+                                    </button>
+                                )}
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
+                                    className="w-8 h-8 rounded-full bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm flex items-center justify-center text-black dark:text-white shadow-lg hover:bg-red-500 hover:text-white transition-colors"
+                                    title={t.delete}
+                                >
+                                    <span className="material-icons-round text-sm">delete</span>
+                                </button>
+                            </div>
+
+                            {/* Status Badges (Always Visible if needed, minimal style) */}
+                            <div className="absolute top-3 left-3 flex gap-2">
+                                {(project.isAiRemix || project.isAiIdea) && (
+                                    <div className="w-6 h-6 rounded-full bg-white/30 backdrop-blur-md flex items-center justify-center border border-white/50 shadow-sm">
+                                        <span className="material-icons-round text-white text-[10px]">auto_awesome</span>
+                                    </div>
+                                )}
+                                {!project.isPublic && (
+                                    <div className="w-6 h-6 rounded-full bg-black/30 backdrop-blur-md flex items-center justify-center border border-white/20 shadow-sm">
+                                        <span className="material-icons-round text-white text-[10px]">lock</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );

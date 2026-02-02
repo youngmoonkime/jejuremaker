@@ -138,12 +138,14 @@ const TRANSLATIONS = {
 
 type TimePeriod = 'week' | 'month' | 'all';
 
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+
 const Trending: React.FC<TrendingProps> = ({ onNavigate, onProjectSelect, language, projects, onLikeToggle, likedProjects }) => {
     const t = TRANSLATIONS[language];
     const [timePeriod, setTimePeriod] = useState<TimePeriod>('week');
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
-    // Extract unique categories from projects
+
     const categories = useMemo(() => {
         const categoriesSet = new Set<string>();
         projects.forEach(project => {
@@ -362,7 +364,13 @@ const Trending: React.FC<TrendingProps> = ({ onNavigate, onProjectSelect, langua
                                 #{rank}
                             </div>
                             <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden flex-shrink-0 shadow-sm relative ml-2 sm:ml-4">
-                                <img alt={project.title} className="w-full h-full object-cover transform transition-transform duration-500 group-hover:scale-110" src={project.image} />
+                                <img
+                                    alt={project.title}
+                                    className="w-full h-full object-cover transform transition-transform duration-500 group-hover:scale-110"
+                                    src={getOptimizedImageUrl(project.image, 300)}
+                                    loading="lazy"
+                                    decoding="async"
+                                />
                             </div>
                             <div className="flex-1 ml-4 sm:ml-6 min-w-0 grid grid-cols-1 md:grid-cols-12 items-center gap-2 sm:gap-4">
                                 <div className="md:col-span-4 lg:col-span-5 flex flex-col justify-center">

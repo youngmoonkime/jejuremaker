@@ -41,7 +41,11 @@ export interface Project {
   ownerId?: string; // 소유자 ID
   createdAt?: string; // 생성 날짜
   metadata?: any; // 추가 메타데이터 (Blueprint URL 등)
+  commentsCount?: number; // 댓글 수
 }
+
+// Social Feed Post Type (reusing Project for simplicity but can be distinct)
+export type SocialPost = Project;
 
 export interface Message {
   id: string;
@@ -58,15 +62,24 @@ export type ChatMode = 'human' | 'ai';
 
 // Wizard System Types
 export interface MaterialAnalysis {
-  material: string; // 재료 이름 (예: "플라스틱 병")
+  material: string; // 재료 이름
   description: string; // 재료 설명
-  confidence: number; // 신뢰도 (0-1)
+  confidence: number; // 신뢰도
+  traits?: string; // 소재 DNA 분석 결과 (질감, 색상, 특징 등)
+  recommendations?: { // 카테고리별 추천 스타일 ID
+      lighting?: string;
+      furniture?: string;
+      interior?: string;
+      stationery?: string;
+      [key: string]: string | undefined;
+  };
 }
 
 export interface UserIntent {
   desiredOutcome: string;
   category: string;
   additionalNotes: string;
+  selectedStyle?: string; // 선택된 스타일 ID
 }
 
 export interface CategoryRecommendation {
@@ -75,4 +88,4 @@ export interface CategoryRecommendation {
   suggestions: string[];
 }
 
-export type WizardStep = 'material' | 'intent' | 'generation' | 'complete';
+export type WizardStep = 'material' | 'analysis_result' | 'concepts' | 'blueprint' | '3d_choice' | 'generation' | 'final';

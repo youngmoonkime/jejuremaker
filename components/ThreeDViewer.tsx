@@ -1,21 +1,63 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { config } from '../services/config';
+
+export interface ThreeDViewerHandle {
+    setWireframe: (enabled: boolean) => void;
+    setBackground: (color: string) => void;
+    resetCamera: () => void;
+    rotateModel: (x: number, y: number) => void;
+}
 
 interface ThreeDViewerProps {
     modelUrl: string;
     className?: string;
 }
 
-const ThreeDViewer: React.FC<ThreeDViewerProps> = ({ modelUrl, className = '' }) => {
+const ThreeDViewer = forwardRef<ThreeDViewerHandle, ThreeDViewerProps>(({ modelUrl, className = '' }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<THREE.Scene | null>(null);
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
     const animationIdRef = useRef<number | null>(null);
+    const modelRef = useRef<THREE.Object3D | null>(null);
+
+    useImperativeHandle(ref, () => ({
+        setWireframe: (enabled: boolean) => {
+            if (modelRef.current) {
+                modelRef.current.traverse((child) => {
+                    if (child instanceof THREE.Mesh) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(m => m.wireframe = enabled);
+                        } else {
+                            child.material.wireframe = enabled;
+                        }
+                    }
+                });
+            }
+        },
+        setBackground: (color: string) => {
+            if (sceneRef.current) {
+                sceneRef.current.background = new THREE.Color(color);
+            }
+        },
+        resetCamera: () => {
+            if (cameraRef.current && controlsRef.current) {
+                cameraRef.current.position.set(0, 0, 5);
+                controlsRef.current.reset();
+            }
+        },
+        rotateModel: (x: number, y: number) => {
+            if (modelRef.current) {
+                modelRef.current.rotation.x += x;
+                modelRef.current.rotation.y += y;
+            }
+        }
+    }));
 
     useEffect(() => {
         if (!containerRef.current || !modelUrl) return;
@@ -60,38 +102,44 @@ const ThreeDViewer: React.FC<ThreeDViewerProps> = ({ modelUrl, className = '' })
         controlsRef.current = controls;
 
         // Load Model
-        // Parse extension handling query params
+        // 1. Determine Extension (from original URL)
         const cleanUrl = modelUrl.split('?')[0];
         const fileExtension = cleanUrl.split('.').pop()?.toLowerCase();
 
-        if (fileExtension === 'glb' || fileExtension === 'gltf') {
-            const loader = new GLTFLoader();
-            loader.load(
-                modelUrl,
-                (gltf) => {
-                    const model = gltf.scene;
+        // 2. Prepare Proxy URL (to bypass CORS)
+        let loadUrl = modelUrl;
 
-                    // Center and scale model
-                    const box = new THREE.Box3().setFromObject(model);
-                    const center = box.getCenter(new THREE.Vector3());
-                    const size = box.getSize(new THREE.Vector3());
-                    const maxDim = Math.max(size.x, size.y, size.z);
-                    const scale = 3 / maxDim;
+        console.log("ThreeDViewer: Loading model from:", modelUrl);
 
-                    model.scale.multiplyScalar(scale);
-                    model.position.sub(center.multiplyScalar(scale));
+        const needsProxy = modelUrl.includes('tripo') || modelUrl.includes('amazonaws');
+        if (needsProxy && !modelUrl.includes('tripo-proxy')) {
+            loadUrl = `${config.supabase.url}/functions/v1/tripo-file-proxy?url=${encodeURIComponent(modelUrl)}`;
+            // Use Client-side function proxy if in dev or production based on aiService logic logic for compatibility
+            // ideally we should pass this config in or use the same utility, but hardcoding for now as quick fix to preserve existing logic
+            // Actually, let's keep the existing logic found in the file but wrapped.
+            console.log("ThreeDViewer: Using Proxy URL:", loadUrl);
+        }
 
-                    scene.add(model);
-                },
-                undefined,
-                (error) => {
-                    console.error('Error loading GLB model:', error);
-                }
-            );
-        } else if (fileExtension === 'stl') {
+        const handleModelLoad = (object: THREE.Object3D) => {
+            modelRef.current = object;
+
+            // Center and scale model
+            const box = new THREE.Box3().setFromObject(object);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = 3 / maxDim;
+
+            object.scale.multiplyScalar(scale);
+            object.position.sub(center.multiplyScalar(scale));
+
+            scene.add(object);
+        };
+
+        if (fileExtension === 'stl') {
             const loader = new STLLoader();
             loader.load(
-                modelUrl,
+                loadUrl, // Use proxy URL
                 (geometry) => {
                     const material = new THREE.MeshPhongMaterial({
                         color: 0x888888,
@@ -99,23 +147,24 @@ const ThreeDViewer: React.FC<ThreeDViewerProps> = ({ modelUrl, className = '' })
                         shininess: 200
                     });
                     const mesh = new THREE.Mesh(geometry, material);
-
-                    // Center and scale model
-                    geometry.computeBoundingBox();
-                    const box = geometry.boundingBox!;
-                    const center = box.getCenter(new THREE.Vector3());
-                    const size = box.getSize(new THREE.Vector3());
-                    const maxDim = Math.max(size.x, size.y, size.z);
-                    const scale = 3 / maxDim;
-
-                    mesh.scale.multiplyScalar(scale);
-                    mesh.position.sub(center.multiplyScalar(scale));
-
-                    scene.add(mesh);
+                    handleModelLoad(mesh);
                 },
                 undefined,
                 (error) => {
                     console.error('Error loading STL model:', error);
+                }
+            );
+        } else {
+            // Default to GLB/GLTF
+            const loader = new GLTFLoader();
+            loader.load(
+                loadUrl, // Use proxy URL
+                (gltf) => {
+                    handleModelLoad(gltf.scene);
+                },
+                undefined,
+                (error) => {
+                    console.error('Error loading GLB/GLTF model:', error);
                 }
             );
         }
@@ -163,6 +212,6 @@ const ThreeDViewer: React.FC<ThreeDViewerProps> = ({ modelUrl, className = '' })
             )}
         </div>
     );
-};
+});
 
 export default ThreeDViewer;

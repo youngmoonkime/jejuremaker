@@ -1,30 +1,34 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+interface Env {
+  TRIPO_API_KEY: string;
+  R2_BUCKET: R2Bucket;
+}
 
 const TRIPO_BASE_URL = 'https://api.tripo3d.ai/v2/openapi';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+};
 
-serve(async (req) => {
+export const onRequest: PagesFunction<Env> = async (context) => {
+  const { request, env } = context;
+
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (request.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const url = new URL(req.url);
+    const url = new URL(request.url);
 
     // --- 1. PROXY DOWNLOAD (GET) ---
-    // Usage: GET /tripo-proxy?url=https://...
-    if (req.method === 'GET') {
+    // Usage: GET /api/tripo-proxy?url=https://...
+    if (request.method === 'GET') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) {
         throw new Error("Missing 'url' query parameter");
       }
-
-      console.log(`Proxying request to: ${targetUrl}`);
 
       // Fetch the remote file
       const fileResp = await fetch(targetUrl);
@@ -47,22 +51,22 @@ serve(async (req) => {
     }
 
     // --- 2. API ACTIONS (POST) ---
-    if (req.method === 'POST') {
-        const TRIPO_API_KEY = Deno.env.get("TRIPO_API_KEY");
-        if (!TRIPO_API_KEY) {
-            throw new Error("TRIPO_API_KEY is not set in secrets");
+    if (request.method === 'POST') {
+        const apiKey = env.TRIPO_API_KEY;
+        if (!apiKey) {
+            throw new Error("TRIPO_API_KEY is not set in environment variables");
         }
 
-        const payload = await req.json();
+        const payload = await request.json<any>();
         const { action } = payload;
 
         // A. TEXT TO 3D
-        if (action === 'submit') { // Rename specific action to minimize confusion? Keep 'submit' for text.
+        if (action === 'submit') {
             const { prompt } = payload;
             const resp = await fetch(`${TRIPO_BASE_URL}/task`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${TRIPO_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
@@ -77,62 +81,57 @@ serve(async (req) => {
             });
         }
 
-        // B. IMAGE TO 3D (New Implementation)
+        // B. IMAGE TO 3D
         if (action === 'image_to_3d') {
             const { image_url, image_base64 } = payload;
             let blob: Blob;
 
             // 1. Get Image Blob (from URL or Base64)
             if (image_url) {
-                console.log(`Fetching image from URL: ${image_url}`);
                 const imgResp = await fetch(image_url);
                 if (!imgResp.ok) throw new Error("Failed to fetch image from provided URL");
                 blob = await imgResp.blob();
             } else if (image_base64) {
-               // Convert base64 to blob
                const byteString = atob(image_base64.split(',')[1] || image_base64);
                const ab = new ArrayBuffer(byteString.length);
                const ia = new Uint8Array(ab);
                for (let i = 0; i < byteString.length; i++) {
                    ia[i] = byteString.charCodeAt(i);
                }
-               blob = new Blob([ab], { type: 'image/png' }); // Default to png
+               blob = new Blob([ab], { type: 'image/png' }); 
             } else {
                 throw new Error("Either image_url or image_base64 is required");
             }
 
             // 2. Upload to Tripo to get Token
             const formData = new FormData();
-            formData.append('file', blob, 'image.png'); // Name is required
+            formData.append('file', blob, 'image.png');
 
-            console.log("Uploading image to Tripo...");
             const uploadResp = await fetch(`${TRIPO_BASE_URL}/upload`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${TRIPO_API_KEY}`
-                    // request automatically sets Content-Type to multipart/form-data
+                    'Authorization': `Bearer ${apiKey}`
                 },
                 body: formData
             });
 
-            const uploadData = await uploadResp.json();
+            const uploadData = await uploadResp.json<any>();
             if (uploadData.code !== 0) {
                  throw new Error(`Tripo Upload Failed: ${uploadData.message}`);
             }
             const imageToken = uploadData.data.image_token;
-            console.log(`Got image token: ${imageToken}`);
 
             // 3. Create Task
             const taskResp = await fetch(`${TRIPO_BASE_URL}/task`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${TRIPO_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     type: 'image_to_model',
                     file: {
-                        type: 'png', // or jpg depending on source, but png is safe generic
+                        type: 'png', 
                         file_token: imageToken
                     }
                 })
@@ -151,7 +150,7 @@ serve(async (req) => {
             if (!task_id) throw new Error("task_id is required for status action");
             const resp = await fetch(`${TRIPO_BASE_URL}/task/${task_id}`, {
                 headers: {
-                    'Authorization': `Bearer ${TRIPO_API_KEY}`
+                    'Authorization': `Bearer ${apiKey}`
                 }
             });
             const data = await resp.json();
@@ -164,14 +163,12 @@ serve(async (req) => {
         throw new Error(`Invalid action: ${action}`);
     }
 
-    throw new Error(`Method ${req.method} not supported`);
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
-  } catch (error) {
-    console.error("Proxy Error:", error);
-    const errorMsg = `[Proxy Error] ${error.message}`;
-    return new Response(JSON.stringify({ error: errorMsg }), {
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400
     });
   }
-})
+};

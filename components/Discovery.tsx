@@ -4,6 +4,7 @@ import { Language } from '../App';
 import { User } from '@supabase/supabase-js';
 import { TRANSLATIONS } from '../constants/translations';
 import HeroSection from './HeroSection';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 
 interface DiscoveryProps {
   onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community' | 'profile') => void;
@@ -65,6 +66,8 @@ const Discovery: React.FC<DiscoveryProps> = ({
     return Array.from(materialsSet).sort();
   }, [projects]);
 
+  const [visibleCount, setVisibleCount] = useState<number>(6);
+
   // Filter projects based on selected category
   const filteredProjects = useMemo(() => {
     if (selectedCategory === 'all') {
@@ -76,13 +79,23 @@ const Discovery: React.FC<DiscoveryProps> = ({
     });
   }, [projects, selectedCategory]);
 
+  // Reset visible count when category changes
+  React.useEffect(() => {
+    setVisibleCount(6);
+  }, [selectedCategory]);
+
+  const displayedProjects = filteredProjects.slice(0, visibleCount);
+
+  const handleLoadMore = () => {
+    setVisibleCount(prev => prev + 6);
+  };
+
   const getMaterialIcon = (material: string) => {
     return MATERIAL_ICONS[material] || MATERIAL_ICONS['default'];
   };
 
   return (
     <>
-      {/* Trending Slider */}
       {/* Trending Slider */}
       <HeroSection
         t={t}
@@ -139,14 +152,20 @@ const Discovery: React.FC<DiscoveryProps> = ({
 
       {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 pb-12">
-        {filteredProjects.map((project) => (
+        {displayedProjects.map((project) => (
           <div
             key={project.id}
             className="group flex flex-col gap-3 cursor-pointer"
             onClick={() => onProjectSelect(project)}
           >
             <div className="relative aspect-[4/3] rounded-3xl overflow-hidden bg-gray-100 dark:bg-gray-800 shadow-sm group-hover:shadow-xl transition-all duration-300">
-              <img src={project.image} alt={project.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+              <img
+                src={getOptimizedImageUrl(project.image, 600)}
+                alt={project.title}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                loading="lazy"
+                decoding="async"
+              />
 
               {project.isAiRemix || project.isAiIdea ? (
                 <div className="absolute top-3 right-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs font-bold text-primary flex items-center gap-1 shadow-sm border border-white/50 dark:border-gray-700">
@@ -197,11 +216,16 @@ const Discovery: React.FC<DiscoveryProps> = ({
         ))}
       </div>
 
-      <div className="flex justify-center pb-12">
-        <button className="px-8 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors shadow-sm hover:shadow">
-          {t.loadMore}
-        </button>
-      </div>
+      {visibleCount < filteredProjects.length && (
+        <div className="flex justify-center pb-12">
+          <button
+            onClick={handleLoadMore}
+            className="px-8 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors shadow-sm hover:shadow"
+          >
+            {t.loadMore}
+          </button>
+        </div>
+      )}
     </>
   );
 };
