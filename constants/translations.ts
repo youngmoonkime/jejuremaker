@@ -1,6 +1,6 @@
 export const TRANSLATIONS = {
     ko: {
-        title: '제주 리메이커',
+        title: '제주 리메이크 허브',
         searchPlaceholder: '아이디어, 재료, 메이커 검색...',
         create: '업로드',
         aiAnalysis: 'AI 분석',
@@ -26,7 +26,6 @@ export const TRANSLATIONS = {
         sortBy: '정렬:',
         popular: '인기순',
         newest: '최신순',
-        topRated: '평점순',
         loadMore: '더 보기',
         login: '로그인',
         logout: '로그아웃',
@@ -58,7 +57,7 @@ export const TRANSLATIONS = {
         }
     },
     en: {
-        title: 'Jeju Re-Maker',
+        title: 'Jeju Re-Maker Hub',
         searchPlaceholder: 'Search ideas, materials, or makers...',
         create: 'Upload',
         aiAnalysis: 'AI Analysis',
@@ -84,7 +83,6 @@ export const TRANSLATIONS = {
         sortBy: 'Sort by:',
         popular: 'Popular',
         newest: 'Newest',
-        topRated: 'Top Rated',
         loadMore: 'Load more projects',
         login: 'Login',
         logout: 'Logout',

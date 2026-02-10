@@ -347,7 +347,7 @@ const Trending: React.FC<TrendingProps> = ({ onNavigate, onProjectSelect, langua
             </div>
             {/* Dynamic Project List */}
             <div className="flex flex-col bg-white dark:bg-surface-darker rounded-[2rem] shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
-                {trendingProjects.slice(1).map((project, index) => {
+                {trendingProjects.slice(1, 5).map((project, index) => {
                     const rank = index + 2;
                     const score = ((project.likes || 0) * 2) + (project.views || 0);
                     const maxScore = trendingProjects[0] ? ((trendingProjects[0].likes || 0) * 2) + (trendingProjects[0].views || 0) : 100;

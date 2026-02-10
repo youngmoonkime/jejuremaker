@@ -22,6 +22,7 @@ interface DiscoveryProps {
   onAddProject: (project: Project) => void;
   onLikeToggle: (projectId: string) => void;
   likedProjects: Set<string>;
+  onAnalyzeClick: () => void;
 }
 
 const MATERIAL_ICONS: Record<string, string> = {
@@ -48,10 +49,12 @@ const Discovery: React.FC<DiscoveryProps> = ({
   language,
   projects,
   onLikeToggle,
-  likedProjects
+  likedProjects,
+  onAnalyzeClick
 }) => {
   const t = TRANSLATIONS[language];
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [sortOption, setSortOption] = useState<'popular' | 'newest'>('newest');
 
   // Extract unique materials from projects to create dynamic categories
   const materialCategories = useMemo(() => {
@@ -68,16 +71,32 @@ const Discovery: React.FC<DiscoveryProps> = ({
 
   const [visibleCount, setVisibleCount] = useState<number>(6);
 
-  // Filter projects based on selected category
+  // Filter & Sort projects
   const filteredProjects = useMemo(() => {
-    if (selectedCategory === 'all') {
-      return projects;
+    let result = projects;
+
+    // 1. Filter by Category
+    if (selectedCategory !== 'all') {
+      result = result.filter(project => {
+        const material = (project as any).material || project.category;
+        return material === selectedCategory;
+      });
     }
-    return projects.filter(project => {
-      const material = (project as any).material || project.category;
-      return material === selectedCategory;
+
+    // 2. Sort
+    return [...result].sort((a, b) => {
+      if (sortOption === 'popular') {
+        const scoreA = (a.likes || 0) + (a.views || 0) * 0.1; // Weight likes more than views
+        const scoreB = (b.likes || 0) + (b.views || 0) * 0.1;
+        return scoreB - scoreA; // Descending
+      } else {
+        // Newest
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA; // Descending
+      }
     });
-  }, [projects, selectedCategory]);
+  }, [projects, selectedCategory, sortOption]);
 
   // Reset visible count when category changes
   React.useEffect(() => {
@@ -99,7 +118,7 @@ const Discovery: React.FC<DiscoveryProps> = ({
       {/* Trending Slider */}
       <HeroSection
         t={t}
-        handleAnalyzeClick={() => document.getElementById('image-upload-input')?.click()}
+        handleAnalyzeClick={onAnalyzeClick}
         handlePaste={(e) => {
           // Implement paste logic or stub
           console.log('Paste handled in HeroSection');
@@ -111,8 +130,8 @@ const Discovery: React.FC<DiscoveryProps> = ({
       />
 
       {/* Filters - Dynamic Material Categories */}
-      <div className="flex items-center justify-between mb-8 overflow-x-auto pb-2 scrollbar-hide">
-        <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4 px-4 sm:px-0">
+        <div className="flex gap-2 overflow-x-auto pb-2 w-full sm:w-auto scrollbar-hide mask-fade-right">
           {/* All Projects Button */}
           <button
             onClick={() => setSelectedCategory('all')}
@@ -140,18 +159,21 @@ const Discovery: React.FC<DiscoveryProps> = ({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 ml-4 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-100 dark:border-gray-700 shadow-sm">
+        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 ml-auto sm:ml-4 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-100 dark:border-gray-700 shadow-sm whitespace-nowrap">
           <span>{t.sortBy}</span>
-          <select className="bg-transparent border-none font-medium text-gray-800 dark:text-gray-200 focus:ring-0 cursor-pointer p-0 pr-6 text-sm">
-            <option>{t.popular}</option>
-            <option>{t.newest}</option>
-            <option>{t.topRated}</option>
+          <select
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value as 'popular' | 'newest')}
+            className="bg-transparent border-none font-medium text-gray-800 dark:text-gray-200 focus:ring-0 cursor-pointer p-0 pr-6 text-sm"
+          >
+            <option value="popular">{t.popular}</option>
+            <option value="newest">{t.newest}</option>
           </select>
         </div>
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 pb-12">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 pb-12 px-4 sm:px-0">
         {displayedProjects.map((project) => (
           <div
             key={project.id}

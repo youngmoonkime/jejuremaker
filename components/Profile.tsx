@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Project } from '../types';
 import { Language } from '../App';
-import { User, createClient } from '@supabase/supabase-js';
+import { User } from '@supabase/supabase-js';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 import { uploadToR2 } from '../services/r2Storage';
-import { config } from '../services/config';
+import { supabase } from '../services/supabase';
 
 interface ProfileProps {
     onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community' | 'profile') => void;
@@ -20,6 +20,7 @@ interface ProfileProps {
     myProjects: Project[];
     onPublish: (projectId: string) => void;
     onDelete: (projectId: string) => void;
+    onEdit: (project: Project) => void;
 }
 
 const TRANSLATIONS = {
@@ -65,7 +66,6 @@ const TRANSLATIONS = {
     }
 };
 
-const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 
 const Profile: React.FC<ProfileProps> = ({
     onNavigate,
@@ -77,24 +77,64 @@ const Profile: React.FC<ProfileProps> = ({
     userTokens,
     myProjects,
     onPublish,
-    onDelete
+    onDelete,
+    onEdit
 }) => {
     const t = TRANSLATIONS[language];
 
     // Edit Mode State
     const [isEditing, setIsEditing] = useState(false);
-    const [displayName, setDisplayName] = useState(user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Maker');
-    const [avatarUrl, setAvatarUrl] = useState(user?.user_metadata?.avatar_url || '');
+    const [displayName, setDisplayName] = useState('Maker');
+    const [avatarUrl, setAvatarUrl] = useState('');
     const [isUploading, setIsUploading] = useState(false);
+    const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Sync state with user prop
+    // Fetch profile from user_profiles table (persistent storage)
     useEffect(() => {
-        if (user) {
-            setDisplayName(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
-            setAvatarUrl(user.user_metadata?.avatar_url || '');
-        }
+        const fetchUserProfile = async () => {
+            if (!user) {
+                setDisplayName('Maker');
+                setAvatarUrl('');
+                setIsLoadingProfile(false);
+                return;
+            }
+
+            setIsLoadingProfile(true);
+            try {
+                // Try to fetch from user_profiles table first
+                const { data: profile, error } = await supabase
+                    .from('user_profiles')
+                    .select('nickname, avatar_url')
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+
+                if (error && error.code !== '42P01') {
+                    // Real error (ignoring table doesn't exist if that's still a concern, though maybeSingle handles empty rows)
+                    console.error('Error fetching profile:', error);
+                }
+
+                if (profile) {
+                    // Use DB values
+                    setDisplayName(profile.nickname || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
+                    setAvatarUrl(profile.avatar_url || user.user_metadata?.avatar_url || '');
+                } else {
+                    // No DB record yet - use OAuth metadata as initial value
+                    setDisplayName(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
+                    setAvatarUrl(user.user_metadata?.avatar_url || '');
+                }
+            } catch (err) {
+                console.error('Failed to fetch user profile:', err);
+                // Fallback to OAuth metadata
+                setDisplayName(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
+                setAvatarUrl(user.user_metadata?.avatar_url || '');
+            } finally {
+                setIsLoadingProfile(false);
+            }
+        };
+
+        fetchUserProfile();
     }, [user]);
 
     const handleAvatarClick = () => {
@@ -123,23 +163,31 @@ const Profile: React.FC<ProfileProps> = ({
         if (!user) return;
 
         try {
-            // 1. Update Auth User Metadata
-            const { error: authError } = await supabase.auth.updateUser({
+            // 1. Upsert to user_profiles table (PRIMARY SOURCE OF TRUTH)
+            const { error: profileError } = await supabase
+                .from('user_profiles')
+                .upsert({
+                    user_id: user.id,
+                    nickname: displayName,
+                    avatar_url: avatarUrl
+                }, {
+                    onConflict: 'user_id'
+                });
+
+            if (profileError) {
+                console.error('Error saving to user_profiles:', profileError);
+                throw profileError;
+            }
+
+            // 2. Also update Auth User Metadata (for display in other places)
+            await supabase.auth.updateUser({
                 data: {
-                    full_name: displayName, // Store "Nickname" as full_name
+                    full_name: displayName,
                     avatar_url: avatarUrl
                 }
             });
 
-            if (authError) throw authError;
-
-            // 2. Sync changes to all historical posts in 'items' table
-            // We need to update 'maker' column and 'metadata.maker_avatar_url'
-            // Since we can't easily partial update JSONB for all rows without a function,
-            // we will primarily update the 'maker' column which is the source of truth for name.
-            // For avatar, we will attempt to update it if the column exists or in metadata.
-
-            // Fetch all items by this user to update their metadata efficiently
+            // 3. Sync changes to all historical posts in 'items' table
             const { data: userItems, error: fetchError } = await supabase
                 .from('items')
                 .select('id, metadata')
@@ -148,21 +196,13 @@ const Profile: React.FC<ProfileProps> = ({
             if (!fetchError && userItems) {
                 const updates = userItems.map(item => ({
                     id: item.id,
-                    maker: displayName, // Update top-level maker column
+                    maker: displayName,
                     metadata: {
                         ...item.metadata,
-                        maker_avatar_url: avatarUrl // Sync avatar to metadata
+                        maker_avatar_url: avatarUrl
                     }
                 }));
 
-                // Batch execute updates? Supabase JS doesn't support bulk update with different values easily yet.
-                // But here all values are the same (except preserving existing metadata).
-                // Actually, we can use a loop or Promise.all. For 100 items it's fine.
-                // Optimization: We can just run one UPDATE query if we don't care about preserving *unique* unknown metadata keys,
-                // BUT we DO care. So we must preserve existing metadata.
-
-                // Better approach: Use SQL function or just loop. 
-                // Let's loop for now, it's safer for preserving data integrity.
                 await Promise.all(updates.map(update =>
                     supabase
                         .from('items')
@@ -175,8 +215,7 @@ const Profile: React.FC<ProfileProps> = ({
             }
 
             setIsEditing(false);
-            // Optional: Force reload or notify parent to refresh
-            window.location.reload(); // Simple way to refresh all components with new data
+            alert(language === 'ko' ? '프로필이 저장되었습니다!' : 'Profile saved successfully!');
         } catch (error) {
             console.error('Failed to update profile:', error);
             alert('Failed to save profile. Please try again.');
@@ -285,8 +324,9 @@ const Profile: React.FC<ProfileProps> = ({
                         <div className="animate-fade-in">
                             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{displayName}</h1>
                             <div className="flex items-center justify-center gap-6 text-gray-500 dark:text-gray-400 text-sm font-medium">
-                                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
-                                    {userTokens} Tokens
+                                <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center gap-1.5 border border-emerald-100 dark:border-emerald-800/50">
+                                    <span className="material-icons-round text-sm">recycling</span>
+                                    {userTokens}
                                 </span>
                                 <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
                                     {myProjects.length} Projects
@@ -347,8 +387,14 @@ const Profile: React.FC<ProfileProps> = ({
                                 </div>
                             </div>
 
-                            {/* Minimal Action Menu (Visible on Hover/Edit) */}
                             <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-2 group-hover:translate-y-0">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onEdit(project); }}
+                                    className="w-8 h-8 rounded-full bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm flex items-center justify-center text-black dark:text-white shadow-lg hover:bg-blue-500 hover:text-white transition-colors"
+                                    title="Edit"
+                                >
+                                    <span className="material-icons-round text-sm">edit</span>
+                                </button>
                                 {!project.isPublic && (
                                     <button
                                         onClick={(e) => { e.stopPropagation(); handlePublish(project.id); }}

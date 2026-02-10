@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { User } from '@supabase/supabase-js';
-import { config } from '../services/config';
+import { supabase } from '../services/supabase';
 import { Project } from '../types';
 
 interface FeedComposerProps {
@@ -14,7 +14,34 @@ const FeedComposer: React.FC<FeedComposerProps> = ({ user, onPostCreated, onLogi
     const [selectedImage, setSelectedImage] = useState<File | null>(null);
     const [imagePreview, setImagePreview] = useState<string>('');
     const [isPosting, setIsPosting] = useState(false);
+    const [userNickname, setUserNickname] = useState<string>('');
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Fetch user's custom nickname from user_profiles table
+    useEffect(() => {
+        const fetchUserNickname = async () => {
+            if (!user) {
+                setUserNickname('');
+                return;
+            }
+            try {
+                const { data: profile } = await supabase
+                    .from('user_profiles')
+                    .select('nickname')
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+
+                if (profile?.nickname) {
+                    setUserNickname(profile.nickname);
+                } else {
+                    setUserNickname(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous');
+                }
+            } catch (err) {
+                setUserNickname(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous');
+            }
+        };
+        fetchUserNickname();
+    }, [user]);
 
     const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -36,10 +63,7 @@ const FeedComposer: React.FC<FeedComposerProps> = ({ user, onPostCreated, onLogi
         setIsPosting(true);
         try {
             // Dynamic imports
-            const { createClient } = await import('@supabase/supabase-js');
             const { uploadToR2 } = await import('../services/r2Storage');
-
-            const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 
             let imageUrl = '';
             // 1. Upload Image if exists
@@ -62,7 +86,7 @@ const FeedComposer: React.FC<FeedComposerProps> = ({ user, onPostCreated, onLogi
             const dbPayload = {
                 title: title || 'Social Post',
                 // description: text, // REMOVED
-                maker: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous',
+                maker: userNickname || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous',
                 image_url: imageUrl,
                 category: 'Social',
                 difficulty: 'Easy',

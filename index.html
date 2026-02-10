@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Jeju Re-Maker</title>
+  <title>Jeju Re-Maker Hub</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -20,8 +20,13 @@
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
   <script>
-    if (typeof window.Buffer === 'undefined') {
-      window.Buffer = buffer.Buffer;
+    // Buffer polyfill - must run after buffer.min.js loads
+    try {
+      if (typeof window.Buffer === 'undefined' && typeof buffer !== 'undefined') {
+        window.Buffer = buffer.Buffer;
+      }
+    } catch (e) {
+      console.warn('Buffer polyfill failed:', e);
     }
   </script>
   <script>

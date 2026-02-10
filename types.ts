@@ -11,6 +11,7 @@ export interface Step {
   title: string;
   desc: string;
   tip?: string;
+  imageUrl?: string;
 }
 
 export interface ModelFile {
@@ -42,6 +43,10 @@ export interface Project {
   createdAt?: string; // 생성 날짜
   metadata?: any; // 추가 메타데이터 (Blueprint URL 등)
   commentsCount?: number; // 댓글 수
+  tools?: string;
+  material?: string;
+  sourceLocation?: string;
+  ecoScore?: any;
 }
 
 // Social Feed Post Type (reusing Project for simplicity but can be distinct)

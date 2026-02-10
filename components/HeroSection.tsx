@@ -103,7 +103,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                         <div className="absolute top-[-20%] right-[-10%] w-[60%] h-[120%] bg-primary/20 rounded-full blur-[120px]"></div>
 
                         {/* Slide Content */}
-                        <div className="relative z-10 w-full px-12 py-8 flex flex-col md:flex-row items-center justify-between gap-12 min-h-[340px]">
+                        <div className="relative z-10 w-full px-6 md:px-12 py-8 flex flex-col md:flex-row items-center justify-between gap-8 md:gap-12 min-h-[340px]">
                             {/* Left: Text Content */}
                             <div className="flex-1 max-w-xl">
                                 <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 backdrop-blur-md rounded-full border border-white/20 mb-6">
@@ -114,24 +114,27 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                                 <h1 className="text-3xl md:text-5xl font-bold mb-4 leading-tight tracking-tight">{slide.title}</h1>
                                 <p className="text-gray-300 mb-8 text-base font-light leading-relaxed opacity-90 line-clamp-2">{slide.subtitle}</p>
 
-                                <div className="flex flex-wrap items-center gap-4">
-                                    <button className="px-8 py-3 bg-primary hover:bg-primary-dark text-white rounded-2xl font-bold shadow-xl shadow-primary/20 transition-all hover:scale-105 active:scale-95">
+                                <div className="flex flex-row flex-wrap items-center gap-3 md:gap-4">
+                                    <button
+                                        onClick={handleAnalyzeClick}
+                                        className="flex-1 sm:flex-none px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white text-sm md:text-base rounded-2xl font-bold shadow-xl shadow-primary/20 transition-all hover:scale-110 active:scale-95 whitespace-nowrap"
+                                    >
                                         {t.hero?.participate || "참여하기"}
                                     </button>
-                                    <button className="px-8 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl font-bold transition-all hover:bg-white/15">
+                                    <button className="flex-1 sm:flex-none px-6 md:px-8 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-sm md:text-base rounded-2xl font-bold transition-all hover:bg-white/15 whitespace-nowrap">
                                         {t.hero?.learnMore || "자세히 보기"}
                                     </button>
                                 </div>
                             </div>
 
                             {/* Right: Stacked Glass Cards Section */}
-                            <div className="relative flex-shrink-0 w-[300px] h-[340px] flex items-center justify-center">
-                                {/* Decorative Back Cards */}
-                                <div className="absolute w-[240px] h-[280px] bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 rotate-[8deg] translate-x-12 translate-y-2 opacity-40 shadow-2xl"></div>
-                                <div className="absolute w-[240px] h-[280px] bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 rotate-[-4deg] translate-x-4 translate-y-[-8px] opacity-60 shadow-2xl"></div>
+                            <div className="relative flex-shrink-0 w-full max-w-[280px] md:w-[300px] aspect-square md:h-[340px] flex items-center justify-center mt-4 md:mt-0">
+                                {/* Decorative Back Cards - Hidden on Mobile for cleaner look */}
+                                <div className="hidden md:block absolute w-[240px] h-[280px] bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 rotate-[8deg] translate-x-12 translate-y-2 opacity-40 shadow-2xl"></div>
+                                <div className="hidden md:block absolute w-[240px] h-[280px] bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 rotate-[-4deg] translate-x-4 translate-y-[-8px] opacity-60 shadow-2xl"></div>
 
                                 {/* Main Glass Card */}
-                                <div className="relative w-[260px] bg-white/10 backdrop-blur-3xl p-5 rounded-[2.5rem] border border-white/20 shadow-2xl group transition-all duration-700 hover:-translate-y-2">
+                                <div className="relative w-full md:w-[260px] bg-white/10 backdrop-blur-3xl p-5 rounded-[2.5rem] border border-white/20 shadow-2xl group transition-all duration-700 hover:-translate-y-2">
                                     {/* Image with Featured Tag */}
                                     <div className="relative aspect-[1.1/1] rounded-[1.8rem] overflow-hidden mb-5">
                                         <div className="absolute top-3 right-3 z-20 bg-black/60 backdrop-blur-md border border-white/20 text-white text-[9px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider">

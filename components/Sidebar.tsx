@@ -1,7 +1,8 @@
 import React from 'react';
 import { TRANSLATIONS } from '../constants/translations';
-import { Language } from '../App';
-import { Maker } from '../types';
+import { Maker, Project } from '../types';
+import { ViewState, Language } from '../App';
+import { config } from '../services/config';
 
 interface SidebarProps {
     language: Language;
@@ -31,7 +32,13 @@ const Sidebar: React.FC<SidebarProps> = ({ language, onNavigate, makers, onAnaly
                         onClick={onAnalyzeClick}
                         className="w-full py-2.5 bg-primary hover:bg-primary-dark text-white rounded-xl text-sm font-medium shadow-lg shadow-primary/20 transition-all duration-300 flex items-center justify-center gap-2"
                     >
-                        <span>{t.analyzeNow}</span>
+                        <div className="flex items-center gap-2">
+                            <span>{t.analyzeNow}</span>
+                            <div className="flex items-center gap-1 bg-white/20 px-1.5 py-0.5 rounded-full">
+                                <span className="material-icons-round text-[10px]">recycling</span>
+                                <span className="text-xs">10</span>
+                            </div>
+                        </div>
                     </button>
                 </div>
             </div>
@@ -91,6 +98,34 @@ const Sidebar: React.FC<SidebarProps> = ({ language, onNavigate, makers, onAnaly
                     <span className="material-icons-round">people</span>
                     {t.community}
                 </button>
+
+                {/* Lab Navigation: External Link if Separate Service, otherwise Internal Route (New Tab) */}
+                {config.app.labUrl ? (
+                    <a
+                        href={config.app.labUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white"
+                    >
+                        <span className="material-icons-round">science</span>
+                        {language === 'ko' ? '제주 리메이크 랩' : 'Jeju Remake Lab'}
+                        <span className="material-icons-round text-xs ml-auto opacity-50">open_in_new</span>
+                    </a>
+                ) : (
+                    <a
+                        href="/?view=lab"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${currentView === 'lab'
+                            ? 'bg-gray-100 dark:bg-gray-800 text-primary'
+                            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <span className="material-icons-round">science</span>
+                        {language === 'ko' ? '제주 리메이크 랩' : 'Jeju Remake Lab'}
+                        <span className="material-icons-round text-xs ml-auto opacity-50">open_in_new</span>
+                    </a>
+                )}
             </nav>
 
             <div>

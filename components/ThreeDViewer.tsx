@@ -111,7 +111,7 @@ const ThreeDViewer = forwardRef<ThreeDViewerHandle, ThreeDViewerProps>(({ modelU
 
         console.log("ThreeDViewer: Loading model from:", modelUrl);
 
-        const needsProxy = modelUrl.includes('tripo') || modelUrl.includes('amazonaws');
+        const needsProxy = modelUrl.includes('tripo') || modelUrl.includes('amazonaws') || modelUrl.includes('r2.dev') || modelUrl.includes('cloudflare');
         if (needsProxy && !modelUrl.includes('tripo-proxy')) {
             loadUrl = `${config.supabase.url}/functions/v1/tripo-file-proxy?url=${encodeURIComponent(modelUrl)}`;
             // Use Client-side function proxy if in dev or production based on aiService logic logic for compatibility
@@ -135,6 +135,13 @@ const ThreeDViewer = forwardRef<ThreeDViewerHandle, ThreeDViewerProps>(({ modelU
 
             scene.add(object);
         };
+
+        // Skip if URL points to an image file (not a 3D model)
+        const imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'];
+        if (fileExtension && imageExtensions.includes(fileExtension)) {
+            console.warn('ThreeDViewer: URL points to an image file, not a 3D model:', modelUrl);
+            return;
+        }
 
         if (fileExtension === 'stl') {
             const loader = new STLLoader();

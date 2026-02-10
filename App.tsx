@@ -1,22 +1,31 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { createClient, User } from '@supabase/supabase-js';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
+import { User } from '@supabase/supabase-js';
 import Discovery from './components/Discovery';
 import ProjectDetail from './components/ProjectDetail';
-import Workspace from './components/Workspace';
-import AdminUpload from './components/AdminUpload';
-import Trending from './components/Trending';
-import Community from './components/Community';
-import AuthModal from './components/AuthModal';
-import Profile from './components/Profile';
 import Layout from './components/Layout';
+import AuthModal from './components/AuthModal';
 import { Project, Maker } from './types';
+import { supabase } from './services/supabase';
 
-import { config } from './services/config';
+// Lazy-loaded components (code splitting)
+const Workspace = React.lazy(() => import('./components/Workspace'));
+const AdminUpload = React.lazy(() => import('./components/AdminUpload'));
+const Trending = React.lazy(() => import('./components/Trending'));
+const Community = React.lazy(() => import('./components/Community'));
+const RemakeLab = React.lazy(() => import('./components/RemakeLab'));
+const Profile = React.lazy(() => import('./components/Profile'));
 
-// Supabase Configuration
-const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+// Loading fallback for lazy components
+const LazyFallback = () => (
+  <div className="flex items-center justify-center min-h-[400px]">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin"></div>
+      <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
+    </div>
+  </div>
+);
 
-type ViewState = 'discovery' | 'detail' | 'workspace' | 'upload' | 'trending' | 'community' | 'profile';
+export type ViewState = 'discovery' | 'detail' | 'workspace' | 'upload' | 'trending' | 'community' | 'profile' | 'lab';
 export type Language = 'ko' | 'en';
 
 const INITIAL_PROJECTS: Project[] = [
@@ -29,11 +38,31 @@ const INITIAL_PROJECTS: Project[] = [
 ];
 
 const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<ViewState>('discovery');
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [language, setLanguage] = useState<Language>('ko');
+  // Initialize ViewState from URL query parameter (for direct linking / new tab)
+  const [currentView, setCurrentView] = useState<ViewState>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const viewParam = params.get('view') as ViewState;
+      if (viewParam === 'lab') return 'lab';
+    }
+    return 'discovery';
+  });
+  // Persistent State Initialization
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('jejuremaker_theme') === 'dark';
+    }
+    return false;
+  });
+  const [language, setLanguage] = useState<Language>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('jejuremaker_language') as Language) || 'ko';
+    }
+    return 'ko';
+  });
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [searchTerm, setSearchTerm] = useState<string>(''); // Search state
 
   // Authentication & Token State
   const [user, setUser] = useState<User | null>(null);
@@ -45,6 +74,9 @@ const App: React.FC = () => {
 
   // Wizard Modal State (Global)
   const [showWizard, setShowWizard] = useState(false);
+
+  // Edit State
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
 
   // Calculate Top Makers dynamically (Global Logic)
   const MAKERS = useMemo(() => {
@@ -90,14 +122,20 @@ const App: React.FC = () => {
     return sortedMakers;
   }, [projects]);
 
-  // Apply dark mode class to html element
+  // Persist Theme and Language
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('jejuremaker_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
+      localStorage.setItem('jejuremaker_theme', 'light');
     }
   }, [isDarkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('jejuremaker_language', language);
+  }, [language]);
 
   // Auth Listener & Projects Fetch
   useEffect(() => {
@@ -140,7 +178,7 @@ const App: React.FC = () => {
           const mappedProjects: Project[] = data.map((item: any) => ({
             id: item.id.toString(),
             title: item.title,
-            maker: item.maker || item.metadata?.maker_name || 'Master Kim',
+            maker: item.metadata?.maker_name || item.maker || 'Maker',
             image: item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80', // Fallback for missing images
             images: item.metadata?.images || [], // 여러 이미지 지원
             category: item.category,
@@ -158,7 +196,9 @@ const App: React.FC = () => {
             ownerId: item.owner_id,
             likes: item.likes || 0, // Add likes
             views: item.views || 0, // Add views
-            createdAt: item.created_at // Add createdAt
+            createdAt: item.created_at, // Add createdAt
+            tools: item.metadata?.tools || item.required_tools || '', // Map tools from metadata or fallback column
+            material: item.material || item.metadata?.material || 'Unknown Material' // Map material
           }));
 
           // Filter only public projects for Discovery
@@ -181,7 +221,6 @@ const App: React.FC = () => {
           if (!data) {
             await supabase.from('items').insert({
               title: p.title,
-              description: p.description || p.title,
               image_url: p.image,
               category: p.category,
               estimated_time: p.time,
@@ -191,6 +230,7 @@ const App: React.FC = () => {
               likes: p.likes,
               views: p.views,
               metadata: {
+                description: p.description || p.title,
                 fabrication_guide: p.steps || [],
                 maker_name: p.maker
               }
@@ -210,24 +250,18 @@ const App: React.FC = () => {
 
   // Extracted fetch function
   const fetchMyProjects = async () => {
-    console.log('=== fetchMyProjects called ===');
-    console.log('User:', user?.id);
-
     if (!user) {
-      console.log('No user, clearing myProjects');
       setMyProjects([]);
       return;
     }
 
     try {
-      console.log('Fetching projects for user:', user.id);
       const { data, error } = await supabase
         .from('items')
         .select('*')
         .eq('owner_id', user.id)
         .order('created_at', { ascending: false });
 
-      console.log('Supabase response - data:', data, 'error:', error);
 
       if (error) {
         console.error('Supabase error fetching projects:', error);
@@ -235,7 +269,6 @@ const App: React.FC = () => {
       }
 
       if (data) {
-        console.log('Found', data.length, 'projects');
         const mappedProjects: Project[] = data.map((item: any) => ({
           id: item.id.toString(),
           title: item.title,
@@ -256,14 +289,18 @@ const App: React.FC = () => {
           ownerId: item.owner_id,
           likes: item.likes || 0,
           views: item.views || 0,
-          createdAt: item.created_at
+          createdAt: item.created_at,
+          tools: item.metadata?.tools || item.required_tools || '',
+          material: item.material || item.metadata?.material || 'Unknown Material'
         }));
 
-        console.log('Setting myProjects:', mappedProjects);
         setMyProjects(mappedProjects);
       }
-    } catch (error) {
-      console.error('Failed to fetch my projects:', error);
+    } catch (error: any) {
+      // Ignore AbortError (code 20) - this happens with React StrictMode
+      if (error?.code !== '20') {
+        console.error('Failed to fetch my projects:', error);
+      }
     }
   };
 
@@ -272,14 +309,11 @@ const App: React.FC = () => {
   }, [user]);
 
   const handleAddProject = (newProject: Project) => {
-    console.log('App: handleAddProject called with:', newProject);
-
     // 1. Optimistic Update
     setMyProjects(prev => [newProject, ...prev]);
 
     // 2. Background Refresh to ensure consistency
     setTimeout(() => {
-      console.log('App: Refreshing projects from DB...');
       fetchMyProjects();
     }, 1000);
   };
@@ -287,17 +321,12 @@ const App: React.FC = () => {
   // Fetch and manage user tokens from database
   useEffect(() => {
     const fetchUserTokens = async () => {
-      console.log('=== fetchUserTokens called ===');
-      console.log('User:', user?.id);
-
       if (!user) {
-        console.log('No user, setting default tokens');
         setUserTokens(25); // Default for logged out users
         return;
       }
 
       try {
-        console.log('Fetching tokens for user:', user.id);
         // Check if user has token record
         const { data, error } = await supabase
           .from('user_tokens')
@@ -305,11 +334,8 @@ const App: React.FC = () => {
           .eq('user_id', user.id)
           .single();
 
-        console.log('Supabase response - data:', data, 'error:', error);
-
         if (error && error.code === 'PGRST116') {
           // No record exists, create one
-          console.log('Creating new token record for user');
           const { data: newRecord, error: insertError } = await supabase
             .from('user_tokens')
             .insert({
@@ -335,7 +361,6 @@ const App: React.FC = () => {
           const now = new Date();
 
           if (now >= nextReset) {
-            console.log('Token reset needed, resetting to 25');
             // Reset tokens
             const { data: resetData, error: resetError } = await supabase
               .from('user_tokens')
@@ -367,6 +392,11 @@ const App: React.FC = () => {
 
     fetchUserTokens();
   }, [user]);
+
+  // Refetch my projects when view changes (to catch uploads)
+  useEffect(() => {
+    fetchMyProjects();
+  }, [currentView]);
 
   // Load liked projects from localStorage
   useEffect(() => {
@@ -472,6 +502,15 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+
+    // Clear persistent settings on logout
+    localStorage.removeItem('jejuremaker_theme');
+    localStorage.removeItem('jejuremaker_language');
+
+    // Reset local state (Optional: or let them stay until refresh? Usually better to reset visually)
+    setIsDarkMode(false);
+    setLanguage('ko');
+
     alert(language === 'ko' ? '로그아웃 되었습니다.' : 'Logged out successfully.');
     setCurrentView('discovery');
   };
@@ -481,6 +520,34 @@ const App: React.FC = () => {
       setAuthTargetView(targetView);
     }
     setShowAuthModal(true);
+  };
+
+  const handleAnalyzeRequest = () => {
+    if (!user) {
+      setAuthTargetView('discovery');
+      setShowAuthModal(true);
+    } else {
+      // Check for sufficient tokens
+      if (userTokens < 10) {
+        alert(language === 'ko' ? '토큰이 부족합니다. (필요: 10)' : 'Not enough tokens. (Required: 10)');
+        return;
+      }
+
+      // Deduct tokens immediately
+      const cost = 10;
+      updateUserTokens(userTokens - cost);
+
+      setShowWizard(true);
+    }
+  };
+
+  const handleWizardCancel = () => {
+    // Refund tokens if user cancels wizard
+    console.log('Wizard canceled, refunding 10 tokens');
+    if (user) {
+      updateUserTokens(userTokens + 10);
+    }
+    setShowWizard(false);
   };
 
   const handleUploadComplete = (newProject: Project) => {
@@ -586,10 +653,35 @@ const App: React.FC = () => {
     }
   };
 
+  const handleEditProject = (project: Project) => {
+    setProjectToEdit(project);
+    setCurrentView('upload');
+  };
+
   const handleProjectSelect = (project: Project) => {
     setSelectedProject(project);
     setCurrentView('detail');
   };
+
+  const handleSearch = (term: string) => {
+    setSearchTerm(term);
+    if (term) {
+      setCurrentView('discovery');
+    }
+  };
+
+  // Filter projects based on search term
+  const filteredProjects = useMemo(() => {
+    if (!searchTerm) return projects;
+    const lowerTerm = searchTerm.toLowerCase();
+    return projects.filter(project =>
+      project.title.toLowerCase().includes(lowerTerm) ||
+      (project.description && project.description.toLowerCase().includes(lowerTerm)) ||
+      project.category.toLowerCase().includes(lowerTerm) ||
+      project.maker.toLowerCase().includes(lowerTerm) ||
+      project.material.toLowerCase().includes(lowerTerm)
+    );
+  }, [projects, searchTerm]);
 
   const renderView = () => {
     switch (currentView) {
@@ -602,7 +694,7 @@ const App: React.FC = () => {
             toggleDarkMode={toggleDarkMode}
             language={language}
             toggleLanguage={toggleLanguage}
-            projects={projects}
+            projects={filteredProjects}
             user={user}
             onLoginClick={handleLoginClick}
             onLogout={handleLogout}
@@ -616,19 +708,24 @@ const App: React.FC = () => {
       case 'detail':
         return (
           <ProjectDetail
-            project={selectedProject}
-            onBack={() => setCurrentView('discovery')}
+            onBack={() => {
+              setSelectedProject(null);
+              setCurrentView('discovery');
+            }}
             onOpenWorkspace={() => setCurrentView('workspace')}
+            project={selectedProject}
             isDarkMode={isDarkMode}
             toggleDarkMode={toggleDarkMode}
             language={language}
             toggleLanguage={toggleLanguage}
             user={user}
             onLoginClick={handleLoginClick}
-            onNavigate={(view: any) => setCurrentView(view)}
+            onNavigate={setCurrentView}
             onLikeToggle={handleLikeToggle}
             onViewIncrement={handleViewIncrement}
             likedProjects={likedProjects}
+            userTokens={userTokens}
+            onDeductTokens={(amount) => updateUserTokens(userTokens - amount)}
           />
         );
       case 'workspace':
@@ -648,10 +745,15 @@ const App: React.FC = () => {
         return (
           <AdminUpload
             supabase={supabase}
-            onBack={() => setCurrentView('discovery')}
+            onBack={() => {
+              setProjectToEdit(null); // Clear edit state on back
+              setCurrentView('discovery');
+            }}
             onUploadComplete={handleUploadComplete}
             language={language}
             user={user}
+            onSelectProject={handleProjectSelect}
+            initialProject={projectToEdit}
           />
         );
       case 'trending':
@@ -666,7 +768,7 @@ const App: React.FC = () => {
             user={user}
             onLoginClick={handleLoginClick}
             onLogout={handleLogout}
-            projects={projects}
+            projects={filteredProjects}
             onLikeToggle={handleLikeToggle}
             likedProjects={likedProjects}
           />
@@ -682,6 +784,13 @@ const App: React.FC = () => {
             user={user}
             onLoginClick={handleLoginClick}
             onLogout={handleLogout}
+          />
+        );
+      case 'lab':
+        return (
+          <RemakeLab
+            language={language}
+            userTokens={userTokens}
           />
         );
       case 'profile':
@@ -700,6 +809,7 @@ const App: React.FC = () => {
             myProjects={myProjects}
             onPublish={handlePublish}
             onDelete={handleDeleteProject}
+            onEdit={handleEditProject}
           />
         );
       default:
@@ -711,7 +821,7 @@ const App: React.FC = () => {
             toggleDarkMode={toggleDarkMode}
             language={language}
             toggleLanguage={toggleLanguage}
-            projects={projects}
+            projects={filteredProjects}
             user={user}
             onLoginClick={handleLoginClick}
             onLogout={handleLogout}
@@ -720,6 +830,7 @@ const App: React.FC = () => {
             onAddProject={handleAddProject}
             onLikeToggle={handleLikeToggle}
             likedProjects={likedProjects}
+            onAnalyzeClick={handleAnalyzeRequest}
           />
         );
     }
@@ -737,14 +848,21 @@ const App: React.FC = () => {
       onNavigate={setCurrentView}
       onLogout={handleLogout}
       makers={MAKERS}
-      onAnalyzeClick={() => setShowWizard(true)}
+      onAnalyzeClick={handleAnalyzeRequest}
       showWizard={showWizard}
       setShowWizard={setShowWizard}
       setUserTokens={updateUserTokens}
-      onAddProject={handleAddProject}
+      onAddProject={(project) => {
+        handleAddProject(project);
+        setCurrentView('profile');
+      }} // Pass to Layout if needed
       currentView={currentView}
+      onSearch={handleSearch}
+      onCancel={handleWizardCancel}
     >
-      {renderView()}
+      <Suspense fallback={<LazyFallback />}>
+        {renderView()}
+      </Suspense>
 
       {/* Global Auth Modal - Keep it here or in Layout if preferred */}
       {showAuthModal && (

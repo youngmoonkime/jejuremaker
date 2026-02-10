@@ -13,6 +13,8 @@ interface HeaderProps {
     onLoginClick: (target?: any) => void;
     onNavigate: (view: any) => void;
     onLogout: () => void;
+    onSearch?: (term: string) => void;
+    currentView?: string; // Optional for backward compatibility, but recommended
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -24,11 +26,29 @@ const Header: React.FC<HeaderProps> = ({
     toggleDarkMode,
     onLoginClick,
     onNavigate,
-    onLogout
+    onLogout,
+
+    onSearch,
+    currentView
 }) => {
     const t = TRANSLATIONS[language];
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [isSearchFocused, setIsSearchFocused] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+
+    const handleSearch = (term: string) => {
+        if (onSearch) {
+            onSearch(term);
+            setIsSearchFocused(false);
+            setSearchTerm(term); // Keep term
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSearch(searchTerm);
+        }
+    };
 
     // Jeju Re-Maker relevant popular topics
     const popularTopics = [
@@ -53,85 +73,107 @@ const Header: React.FC<HeaderProps> = ({
         { rank: 8, text: "에코 패키지" },
     ];
 
+    const isLabView = currentView === 'lab';
+
     return (
         <header className="fixed top-0 w-full z-50 bg-white/80 dark:bg-[#121212]/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 h-16 transition-colors duration-300">
-            <div className="max-w-[1600px] mx-auto px-6 h-full flex items-center justify-between relative">
+            <div className="max-w-[1600px] mx-auto px-4 md:px-6 h-full flex items-center justify-between relative">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavigate('discovery')}>
-                    <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/30">
+                    <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/30 flex-shrink-0">
                         <span className="material-icons-round text-xl">recycling</span>
                     </div>
-                    <span className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">Jeju <span className="text-primary">Re-Maker</span></span>
+                    {isLabView ? (
+                        <span className="font-bold text-lg md:text-xl tracking-tight text-gray-900 dark:text-white whitespace-nowrap">Jeju <span className="text-primary">Remake Lab</span></span>
+                    ) : (
+                        <span className="font-bold text-lg md:text-xl tracking-tight text-gray-900 dark:text-white whitespace-nowrap">Jeju <span className="text-primary">Re-Maker Hub</span></span>
+                    )}
                 </div>
 
-                {/* Search Input Container */}
-                <div className="hidden md:flex flex-1 mx-8 justify-center relative z-50">
-                    <div className={`relative w-full transition-all duration-300 ${isSearchFocused ? 'max-w-2xl' : 'max-w-lg'}`}>
-                        <div className="bg-gray-100 dark:bg-[#1e1e1e] px-4 py-1.5 rounded-full flex items-center w-full border border-transparent focus-within:bg-white dark:focus-within:bg-[#252525] focus-within:shadow-[0_0_20px_rgba(16,183,127,0.15)] focus-within:border-primary/30 transition-all duration-300">
-                            <div className={`mr-3 transition-colors duration-300 ${isSearchFocused ? 'text-primary' : 'text-gray-400'}`}>
-                                <span className="material-icons-round text-xl">search</span>
+                {/* Search Input Container - Hidden in Lab View */}
+                {!isLabView && (
+                    <div className="hidden md:flex flex-1 mx-8 justify-center relative z-50">
+                        <div className={`relative w-full transition-all duration-300 ${isSearchFocused ? 'max-w-2xl' : 'max-w-lg'}`}>
+                            <div className="bg-gray-100 dark:bg-[#1e1e1e] px-4 py-1.5 rounded-full flex items-center w-full border border-transparent focus-within:bg-white dark:focus-within:bg-[#252525] focus-within:shadow-[0_0_20px_rgba(16,183,127,0.15)] focus-within:border-primary/30 transition-all duration-300">
+                                <div
+                                    className={`mr-3 transition-colors duration-300 ${isSearchFocused ? 'text-primary cursor-pointer' : 'text-gray-400'}`}
+                                    onClick={() => handleSearch(searchTerm)}
+                                >
+                                    <span className="material-icons-round text-xl">search</span>
+                                </div>
+                                <input
+                                    type="text"
+                                    placeholder={t.heroPlaceholder || "모델, 사용자, 컬렉션 및 게시물 검색"}
+                                    className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-500 text-sm h-full py-1"
+                                    onFocus={() => setIsSearchFocused(true)}
+                                    onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)} // Delay to allow clicks
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                />
                             </div>
-                            <input
-                                type="text"
-                                placeholder={t.heroPlaceholder || "모델, 사용자, 컬렉션 및 게시물 검색"}
-                                className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-500 text-sm h-full py-1"
-                                onFocus={() => setIsSearchFocused(true)}
-                                onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)} // Delay to allow clicks
-                            />
-                        </div>
 
-                        {/* Search Dropdown (Popular Topics) */}
-                        {isSearchFocused && (
-                            <div className="absolute top-full left-0 w-full mt-2 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden p-6 animate-in fade-in zoom-in-95 duration-200">
-                                <div className="grid grid-cols-2 gap-8">
-                                    {/* Column 1: Popular Topics */}
-                                    <div>
-                                        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-200 mb-4">인기 주제</h3>
-                                        <div className="flex items-center gap-2 mb-3 text-sm text-[#ff4c4c] font-medium">
-                                            <span className="material-icons-round text-base">trending_up</span>
-                                            <span>제주 업사이클링</span>
+                            {/* Search Dropdown (Popular Topics) */}
+                            {isSearchFocused && (
+                                <div className="absolute top-full left-0 w-full mt-2 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden p-6 animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="grid grid-cols-2 gap-8">
+                                        {/* Column 1: Popular Topics */}
+                                        <div>
+                                            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-200 mb-4">인기 주제</h3>
+                                            <div className="flex items-center gap-2 mb-3 text-sm text-[#ff4c4c] font-medium">
+                                                <span className="material-icons-round text-base">trending_up</span>
+                                                <span>제주 업사이클링</span>
+                                            </div>
+                                            <ul className="space-y-2.5">
+                                                {popularTopics.map((topic) => (
+                                                    <li
+                                                        key={topic.rank}
+                                                        className="flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 p-1 rounded-md transition-colors"
+                                                        onClick={() => handleSearch(topic.text)}
+                                                    >
+                                                        <span className={`font-bold w-4 text-center ${topic.rank <= 3 ? 'text-[#ff4c4c]' : 'text-gray-400'}`}>{topic.rank}</span>
+                                                        <span className="text-gray-700 dark:text-gray-300">{topic.text}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
                                         </div>
-                                        <ul className="space-y-2.5">
-                                            {popularTopics.map((topic) => (
-                                                <li key={topic.rank} className="flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 p-1 rounded-md transition-colors">
-                                                    <span className={`font-bold w-4 text-center ${topic.rank <= 3 ? 'text-[#ff4c4c]' : 'text-gray-400'}`}>{topic.rank}</span>
-                                                    <span className="text-gray-700 dark:text-gray-300">{topic.text}</span>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
 
-                                    {/* Column 2: Recommended (Jeju Collections) */}
-                                    <div>
-                                        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-200 mb-4">제주 컬렉션</h3>
-                                        <ul className="space-y-2.5">
-                                            {recommendedTopics.map((topic) => (
-                                                <li key={topic.rank} className="flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 p-1 rounded-md transition-colors">
-                                                    <span className={`font-bold w-4 text-center ${topic.rank <= 3 ? 'text-primary' : 'text-gray-400'}`}>{topic.rank}</span>
-                                                    <span className="text-gray-700 dark:text-gray-300">{topic.text}</span>
-                                                </li>
-                                            ))}
-                                        </ul>
+                                        {/* Column 2: Recommended (Jeju Collections) */}
+                                        <div>
+                                            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-200 mb-4">제주 컬렉션</h3>
+                                            <ul className="space-y-2.5">
+                                                {recommendedTopics.map((topic) => (
+                                                    <li
+                                                        key={topic.rank}
+                                                        className="flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 p-1 rounded-md transition-colors"
+                                                        onClick={() => handleSearch(topic.text)}
+                                                    >
+                                                        <span className={`font-bold w-4 text-center ${topic.rank <= 3 ? 'text-primary' : 'text-gray-400'}`}>{topic.rank}</span>
+                                                        <span className="text-gray-700 dark:text-gray-300">{topic.text}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5 md:gap-4">
 
                     {/* Token Display (If User) */}
                     {user && (
-                        <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 rounded-full border border-indigo-100 dark:border-indigo-800/50">
-                            <span className="text-base">💎</span>
-                            <span className="text-sm font-bold text-indigo-900 dark:text-indigo-200">{userTokens}</span>
+                        <div className="hidden md:flex items-center gap-1.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 rounded-full border border-emerald-100 dark:border-emerald-800/50 shadow-sm">
+                            <span className="material-icons-round text-emerald-500 text-base">recycling</span>
+                            <span className="text-sm font-bold text-emerald-900 dark:text-emerald-100">{userTokens}</span>
                         </div>
                     )}
 
-                    {/* Language Toggle */}
+                    {/* Language Toggle - Hidden on very small screens if needed, but keeping for now with smaller padding */}
                     <button
                         onClick={toggleLanguage}
-                        className="px-3 py-1.5 rounded-lg font-bold text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                        className="px-2 md:px-3 py-1.5 rounded-lg font-bold text-[10px] md:text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                     >
                         {language === 'ko' ? 'EN' : '한국어'}
                     </button>
@@ -139,23 +181,25 @@ const Header: React.FC<HeaderProps> = ({
                     {/* Dark Mode Toggle */}
                     <button
                         onClick={toggleDarkMode}
-                        className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+                        className="p-1.5 md:p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
                     >
-                        <span className="material-icons-round">{isDarkMode ? 'light_mode' : 'dark_mode'}</span>
+                        <span className="material-icons-round text-xl md:text-2xl">{isDarkMode ? 'light_mode' : 'dark_mode'}</span>
                     </button>
 
-                    <button className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors relative">
+                    <button className="hidden sm:block p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors relative">
                         <span className="material-icons-round">notifications_none</span>
                         <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
                     </button>
-                    <button
-                        onClick={() => user ? onNavigate('upload') : onLoginClick('upload')}
-                        className="flex items-center gap-2 pl-3 pr-1 py-1 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors group">
-                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{t.create}</span>
-                        <div className="w-7 h-7 bg-primary group-hover:bg-primary-dark rounded-full flex items-center justify-center text-white transition-colors">
-                            <span className="material-icons-round text-sm">upload</span>
-                        </div>
-                    </button>
+                    {!isLabView && (
+                        <button
+                            onClick={() => user ? onNavigate('upload') : onLoginClick('upload')}
+                            className="flex items-center gap-2 pl-3 pr-1 py-1 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors group">
+                            <span className="text-sm font-medium text-gray-800 dark:text-gray-200 hidden sm:inline">{t.create}</span>
+                            <div className="w-7 h-7 bg-primary group-hover:bg-primary-dark rounded-full flex items-center justify-center text-white transition-colors">
+                                <span className="material-icons-round text-sm">upload</span>
+                            </div>
+                        </button>
+                    )}
 
                     {user ? (
                         <div className="relative">

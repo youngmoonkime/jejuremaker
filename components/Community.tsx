@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { Language } from '../App';
-import { User, createClient } from '@supabase/supabase-js';
-import { config } from '../services/config';
+import { User } from '@supabase/supabase-js';
+import { supabase } from '../services/supabase';
 import { Project, SocialPost } from '../types';
 import FeedComposer from './FeedComposer';
 
@@ -79,7 +79,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
     const fetchFeed = async () => {
         setIsLoading(true);
         try {
-            const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
 
             // Fetch items, sort by created_at desc
             const { data, error } = await supabase
@@ -126,7 +126,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
         setFeedItems(updatedFeed);
 
         // API Call (Fire and forget)
-        const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
         await supabase.from('items').update({ likes: currentLikes + 1 }).eq('id', postId);
     };
 
@@ -180,7 +180,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
             setCommentText({ ...commentText, [postId]: '' });
 
             // 4. Update Supabase
-            const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
             const { error } = await supabase
                 .from('items')
                 .update({ metadata: updatedMetadata }) // Update the JSONB column
@@ -228,7 +228,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
         updatedFeed[postIndex] = { ...post, metadata: updatedMetadata, commentsCount: updatedComments.length };
         setFeedItems(updatedFeed);
 
-        const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
         const { error } = await supabase
             .from('items')
             .update({ metadata: updatedMetadata })
@@ -263,7 +263,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
         setEditingComment(null);
 
-        const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
         const { error } = await supabase
             .from('items')
             .update({ metadata: updatedMetadata })
@@ -307,7 +307,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
         const previousFeed = [...feedItems];
         setFeedItems(feedItems.filter(p => p.id !== postId));
 
-        const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
         const { error } = await supabase.from('items').delete().eq('id', postId);
 
         if (error) {
@@ -331,7 +331,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
         setFeedItems(updatedFeed);
         setEditingPostId(null);
 
-        const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
 
         // Fetch current metadata to preserve it
         const post = feedItems.find(p => p.id === postId);
@@ -503,7 +503,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
                                 {post.category !== 'Social' && post.metadata?.blueprint_url && (
                                     <div className="flex items-center gap-4 bg-gray-50 dark:bg-background-dark rounded-xl p-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border border-gray-100 dark:border-gray-700/50 cursor-pointer">
                                         <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-gray-200">
-                                            <img alt="Blueprint" className="w-full h-full object-cover opacity-80" src={post.metadata.blueprint_url} />
+                                            <img alt="Blueprint" className="w-full h-full object-cover opacity-80" src={post.metadata.blueprint_url} loading="lazy" />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="text-xs font-semibold text-primary mb-0.5">PROJECT BLUEPRINT</div>
@@ -547,7 +547,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
                                                 <div key={idx} className="flex gap-3 relative group">
                                                     <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex-shrink-0 overflow-hidden">
                                                         {comment.userAvatar ? (
-                                                            <img src={comment.userAvatar} className="w-full h-full object-cover" />
+                                                            <img src={comment.userAvatar} className="w-full h-full object-cover" loading="lazy" />
                                                         ) : (
                                                             <div className="w-full h-full flex items-center justify-center text-xs font-bold text-gray-500">{comment.userName?.charAt(0)}</div>
                                                         )}
