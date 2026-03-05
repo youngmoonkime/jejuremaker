@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Language } from '../App';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
+import { config } from '../services/config';
 import { Project, SocialPost } from '../types';
 import FeedComposer from './FeedComposer';
 
@@ -71,6 +72,14 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
     const [commentText, setCommentText] = useState<{ [key: string]: string }>({});
     const [isSubmittingComment, setIsSubmittingComment] = useState<string | null>(null);
 
+    // Like deduplication - persist across reloads
+    const [likedPosts, setLikedPosts] = useState<Set<string>>(() => {
+        try {
+            const saved = localStorage.getItem('jejuremaker_liked_community');
+            return saved ? new Set(JSON.parse(saved)) : new Set();
+        } catch { return new Set(); }
+    });
+
     // Initial Fetch
     useEffect(() => {
         fetchFeed();
@@ -84,27 +93,49 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
             // Fetch items, sort by created_at desc
             const { data, error } = await supabase
                 .from('items')
-                .select('*')
+                .select('id, title, maker, image_url, category, likes, created_at, owner_id, difficulty, metadata')
                 .eq('category', 'Social')
                 .order('created_at', { ascending: false })
                 .limit(20);
 
             if (data) {
+                // Fetch user profiles for the makers
+                const ownerIds = [...new Set(data.map((item: any) => item.owner_id).filter(Boolean))];
+                let profilesMap: Record<string, any> = {};
+                
+                if (ownerIds.length > 0) {
+                    const { data: profilesData } = await supabase
+                        .from('user_profiles')
+                        .select('user_id, nickname, avatar_url')
+                        .in('user_id', ownerIds);
+                        
+                    if (profilesData) {
+                        profilesMap = profilesData.reduce((acc: any, profile: any) => {
+                            acc[profile.user_id] = profile;
+                            return acc;
+                        }, {});
+                    }
+                }
+
                 // Map to SocialPost type
-                const posts: SocialPost[] = data.map(item => ({
-                    id: item.id,
-                    title: item.title,
-                    maker: item.maker || 'User',
-                    image: item.image_url || item.image || '',
-                    category: item.category,
-                    time: new Date(item.created_at).toLocaleDateString(),
-                    difficulty: item.difficulty || 'Easy',
-                    likes: item.likes || 0,
-                    commentsCount: item.metadata?.comments?.length || 0, // Read length from metadata
-                    description: item.description || item.metadata?.content || item.metadata?.description,
-                    metadata: item.metadata || {}, // Ensure metadata exists
-                    ownerId: item.owner_id
-                }));
+                const posts: SocialPost[] = data.map((item: any) => {
+                    const profile = profilesMap[item.owner_id];
+                    return {
+                        id: item.id,
+                        title: item.title,
+                        maker: profile?.nickname || item.metadata?.maker_name || item.maker || 'User',
+                        makerAvatarUrl: profile?.avatar_url || item.metadata?.maker_avatar_url,
+                        image: item.image_url || item.image || '',
+                        category: item.category,
+                        time: new Date(item.created_at).toLocaleDateString(),
+                        difficulty: item.difficulty || 'Easy',
+                        likes: item.likes || 0,
+                        commentsCount: item.metadata?.comments?.length || 0, // Read length from metadata
+                        description: item.description || item.metadata?.content || item.metadata?.description,
+                        metadata: item.metadata || {}, // Ensure metadata exists
+                        ownerId: item.owner_id
+                    };
+                });
                 setFeedItems(posts);
             }
         } catch (err) {
@@ -119,15 +150,53 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
     };
 
     const handleLike = async (postId: string, currentLikes: number) => {
+        const isLiked = likedPosts.has(postId);
+        const increment = isLiked ? -1 : 1;
+
+        // Update liked set
+        const newLikedPosts = new Set(likedPosts);
+        if (isLiked) {
+            newLikedPosts.delete(postId);
+        } else {
+            newLikedPosts.add(postId);
+        }
+        setLikedPosts(newLikedPosts);
+        localStorage.setItem('jejuremaker_liked_community', JSON.stringify(Array.from(newLikedPosts)));
+
         // Optimistic UI Update
         const updatedFeed = feedItems.map(item =>
-            item.id === postId ? { ...item, likes: (item.likes || 0) + 1 } : item
+            item.id === postId ? { ...item, likes: Math.max(0, (item.likes || 0) + increment) } : item
         );
         setFeedItems(updatedFeed);
 
-        // API Call (Fire and forget)
+        // Update database using secure proxy (Bypasses RLS limitations)
+        try {
+            const proxyUrl = `${config.supabase.url}/functions/v1/tripo-file-proxy`;
+            const response = await fetch(proxyUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.supabase.anonKey}`
+                },
+                body: JSON.stringify({
+                    action: 'toggle_like',
+                    projectId: postId,
+                    increment: increment
+                })
+            });
 
-        await supabase.from('items').update({ likes: currentLikes + 1 }).eq('id', postId);
+            if (!response.ok) {
+                console.error('Failed to update likes via proxy:', await response.text());
+                // Revert optimistic update on error
+                setLikedPosts(likedPosts);
+                localStorage.setItem('jejuremaker_liked_community', JSON.stringify(Array.from(likedPosts)));
+                setFeedItems(feedItems);
+            }
+        } catch (err) {
+            console.error('Like error:', err);
+            setLikedPosts(likedPosts);
+            setFeedItems(feedItems);
+        }
     };
 
     const toggleComments = (postId: string) => {
@@ -152,7 +221,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
         try {
             // 1. Create Comment Object
             const newComment = {
-                id: Date.now().toString(),
+                id: crypto.randomUUID(),
                 userId: user.id,
                 userName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
                 userAvatar: user.user_metadata?.avatar_url,
@@ -160,36 +229,33 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
                 createdAt: new Date().toISOString()
             };
 
-            // 2. Find post and append comment locally
+            // 2. Optimistic Update (local)
             const postIndex = feedItems.findIndex(p => p.id === postId);
             if (postIndex === -1) return;
 
             const post = feedItems[postIndex];
             const currentComments = post.metadata?.comments || [];
             const updatedComments = [...currentComments, newComment];
-            const updatedMetadata = { ...post.metadata, comments: updatedComments };
 
-            // 3. Optimistic Update
             const updatedFeed = [...feedItems];
             updatedFeed[postIndex] = {
                 ...post,
-                metadata: updatedMetadata,
+                metadata: { ...post.metadata, comments: updatedComments },
                 commentsCount: updatedComments.length
             };
             setFeedItems(updatedFeed);
             setCommentText({ ...commentText, [postId]: '' });
 
-            // 4. Update Supabase
-
-            const { error } = await supabase
-                .from('items')
-                .update({ metadata: updatedMetadata }) // Update the JSONB column
-                .eq('id', postId);
+            // 3. Atomic DB update via RPC
+            const { error } = await supabase.rpc('add_comment', {
+                p_item_id: postId,
+                p_comment: newComment
+            });
 
             if (error) {
-                console.error("Comment update failed", error);
-                // Revert if needed, but for MVP we alert
+                console.error("Comment add failed", error);
                 alert("Failed to save comment.");
+                setFeedItems(feedItems); // Revert
             }
 
         } catch (e) {
@@ -221,18 +287,17 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
         const post = feedItems[postIndex];
         const updatedComments = (post.metadata?.comments || []).filter((c: any) => c.id !== commentId);
-        const updatedMetadata = { ...post.metadata, comments: updatedComments };
 
         // Optimistic Update
         const updatedFeed = [...feedItems];
-        updatedFeed[postIndex] = { ...post, metadata: updatedMetadata, commentsCount: updatedComments.length };
+        updatedFeed[postIndex] = { ...post, metadata: { ...post.metadata, comments: updatedComments }, commentsCount: updatedComments.length };
         setFeedItems(updatedFeed);
 
-
-        const { error } = await supabase
-            .from('items')
-            .update({ metadata: updatedMetadata })
-            .eq('id', postId);
+        // Atomic DB update via RPC
+        const { error } = await supabase.rpc('delete_comment', {
+            p_item_id: postId,
+            p_comment_id: commentId
+        });
 
         if (error) {
             console.error("Delete comment failed", error);
@@ -254,25 +319,25 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
             }
             return c;
         });
-        const updatedMetadata = { ...post.metadata, comments: updatedComments };
 
         // Optimistic Update
         const updatedFeed = [...feedItems];
-        updatedFeed[postIndex] = { ...post, metadata: updatedMetadata };
+        updatedFeed[postIndex] = { ...post, metadata: { ...post.metadata, comments: updatedComments } };
         setFeedItems(updatedFeed);
 
         setEditingComment(null);
 
-
-        const { error } = await supabase
-            .from('items')
-            .update({ metadata: updatedMetadata })
-            .eq('id', postId);
+        // Atomic DB update via RPC
+        const { error } = await supabase.rpc('update_comment', {
+            p_item_id: postId,
+            p_comment_id: editingComment.commentId,
+            p_new_text: editCommentContent
+        });
 
         if (error) {
             console.error("Update comment failed", error);
             alert("Failed to update comment.");
-            // Revert
+            setFeedItems(feedItems); // Revert
         }
     };
 
@@ -519,9 +584,9 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
                                 <div className="flex items-center gap-6">
                                     <button
                                         onClick={() => handleLike(post.id, post.likes || 0)}
-                                        className="flex items-center gap-2 text-muted-light hover:text-primary transition-colors group"
+                                        className={`flex items-center gap-2 transition-colors group ${likedPosts.has(post.id) ? 'text-primary' : 'text-muted-light hover:text-primary'}`}
                                     >
-                                        <span className="material-icons-round group-hover:scale-110 transition-transform">thumb_up</span>
+                                        <span className={`material-icons-round group-hover:scale-110 transition-transform ${likedPosts.has(post.id) ? 'scale-110' : ''}`}>{likedPosts.has(post.id) ? 'thumb_up' : 'thumb_up_off_alt'}</span>
                                         <span className="text-sm font-medium">{post.likes || 0}</span>
                                     </button>
                                     <button

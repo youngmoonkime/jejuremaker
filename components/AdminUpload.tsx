@@ -56,6 +56,40 @@ const MATERIAL_OPTIONS = [
   { label: '폐HDPE (병뚜껑 등)', value: 'Waste Plastic (HDPE)', unit: 'g' }
 ];
 
+// Match a free-text material name from AI/DB to a MATERIAL_OPTIONS dropdown value
+const resolveMaterialValue = (rawMaterial: string): string => {
+  if (!rawMaterial) return MATERIAL_OPTIONS[0].value;
+  const lower = rawMaterial.toLowerCase();
+
+  // Check if it's already a valid option value
+  if (MATERIAL_OPTIONS.some(opt => opt.value === rawMaterial)) return rawMaterial;
+
+  // Keyword matching
+  if (lower.includes('데님') || lower.includes('청바지') || lower.includes('denim') || lower.includes('jean')) return 'Old Denim Jeans';
+  if (lower.includes('pet') || lower.includes('플라스틱') || lower.includes('plastic') || lower.includes('페트')) return 'Plastic Bottles (PET)';
+  if (lower.includes('목재') || lower.includes('나무') || lower.includes('wood') || lower.includes('파렛') || lower.includes('pallet')) return 'Discarded Wood Pallets';
+  if (lower.includes('유리') || lower.includes('glass') || lower.includes('병')) return 'Glass Bottles';
+  if (lower.includes('커피') || lower.includes('coffee')) return 'Coffee Grounds';
+  if (lower.includes('골판지') || lower.includes('cardboard') || lower.includes('박스')) return 'Cardboard';
+  if (lower.includes('hdpe') || lower.includes('병뚜껑') || lower.includes('플라스틱')) return 'Waste Plastic (HDPE)';
+
+  // Default: first option if no match
+  return MATERIAL_OPTIONS[0].value;
+};
+
+// Infer processing method from step descriptions
+const inferProcessingMethod = (steps: any[]): string => {
+  if (!Array.isArray(steps) || steps.length === 0) return '';
+  const allText = steps.map((s: any) => `${s.title || ''} ${s.desc || s.description || ''}`).join(' ').toLowerCase();
+
+  if (allText.includes('열') || allText.includes('가열') || allText.includes('heat') || allText.includes('용해') || allText.includes('녹')) return 'heat';
+  if (allText.includes('재단') || allText.includes('절단') || allText.includes('자르') || allText.includes('cut') || allText.includes('가위')) return 'cut';
+  if (allText.includes('접착') || allText.includes('화학') || allText.includes('chem')) return 'chem';
+  if (allText.includes('조립') || allText.includes('결합') || allText.includes('바느질') || allText.includes('재봉')) return 'manual';
+
+  return '';
+};
+
 const TRANSLATIONS = {
   ko: {
     sidebar: {
@@ -246,6 +280,8 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   // Edit Mode State: Track existing assets to avoid re-uploading
   const [existingImages, setExistingImages] = useState<string[]>([]);
   const [existingModels, setExistingModels] = useState<any[]>([]);
+  // AI-generated image entries with label tags (mutable so delete works)
+  const [aiImageEntries, setAiImageEntries] = useState<{ key: string; url: string; label: string }[]>([]);
 
   const [isR2Configured, setIsR2Configured] = useState(false);
 
@@ -276,28 +312,71 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   // Populate form if editing
   useEffect(() => {
     if (initialProject) {
-      console.log("Editing project:", initialProject);
-      setFormData({
-        title: initialProject.title,
-        material: initialProject.material || 'Old Denim Jeans',
-        materialQty: (initialProject.metadata as any)?.material_qty || '1',
-        materialUnit: (initialProject.metadata as any)?.material_unit || 'ea',
-        sourceLocation: (initialProject.metadata as any)?.source_location || '',
-        category: initialProject.category,
-        difficulty: initialProject.difficulty,
-        co2: initialProject.ecoScore || (initialProject.metadata as any)?.eco_score || '1.2',
-        time: initialProject.time,
-        isAI: user?.email === 'Master Kim' ? false : (initialProject.isAiRemix || initialProject.isAiIdea || false), // Restore AI flag
-        tools: initialProject.tools || '',
-        processingMethod: (initialProject.metadata as any)?.processing_method || '',
-        steps: initialProject.steps?.map(step => ({
-          title: step.title,
-          desc: step.desc,
-          tip: step.tip || '',
-          imageFile: null,
-          imageUrl: step.imageUrl || ''
-        })) || [{ title: '', desc: '', tip: '', imageFile: null, imageUrl: '' }]
-      });
+      console.log("Editing project metadata parsing:", initialProject);
+      try {
+        let parsedSteps = [{ title: '', desc: '', tip: '', imageFile: null as File | null, imageUrl: '' }];
+        
+        const rawSteps1 = initialProject.steps;
+        const rawSteps2 = (initialProject.metadata as any)?.fabrication_guide;
+        const rawSteps3 = (initialProject.metadata as any)?.guide?.steps;
+        
+        console.log("🔍 Step Sources:", {
+          "initialProject.steps": rawSteps1,
+          "metadata.fabrication_guide": rawSteps2,
+          "metadata.guide.steps": rawSteps3,
+          "metadata (full)": initialProject.metadata
+        });
+        
+        let targetSteps = null;
+        if (Array.isArray(rawSteps1) && rawSteps1.length > 0) targetSteps = rawSteps1;
+        else if (Array.isArray(rawSteps2) && rawSteps2.length > 0) targetSteps = rawSteps2;
+        else if (Array.isArray(rawSteps3) && rawSteps3.length > 0) targetSteps = rawSteps3;
+        
+        if (targetSteps) {
+            parsedSteps = targetSteps.map((step: any) => ({
+                title: step?.title || step?.step || '',
+                desc: step?.desc || step?.description || step?.text || '',
+                tip: step?.tip || '',
+                imageFile: null,
+                imageUrl: step?.imageUrl || step?.image || ''
+            }));
+        }
+
+        setFormData({
+            title: initialProject.title || '',
+            material: resolveMaterialValue(initialProject.material || (initialProject.metadata as any)?.material || ''),
+            materialQty: (initialProject.metadata as any)?.material_qty || '1',
+            materialUnit: (initialProject.metadata as any)?.material_unit || 'ea',
+            sourceLocation: (initialProject.metadata as any)?.source_location || '',
+            category: initialProject.category || 'fashion',
+            difficulty: initialProject.difficulty || 'Intermediate',
+            co2: initialProject.ecoScore || (initialProject.metadata as any)?.eco_score || '1.2',
+            time: initialProject.time || '2h',
+            isAI: user?.email === 'Master Kim' ? false : (initialProject.isAiRemix || initialProject.isAiIdea || false),
+            tools: initialProject.tools || (initialProject.metadata as any)?.tools || '',
+            processingMethod: (initialProject.metadata as any)?.processing_method || inferProcessingMethod(targetSteps || []),
+            steps: parsedSteps
+        });
+      } catch (err) {
+        console.error("Critical error while parsing initial project data for editing:", err);
+      }
+
+      // Build AI image entries for the edit panel
+      const meta = initialProject.metadata as any;
+      const labels: Record<string, string> = {
+        concept: '컨셉 이미지', blueprint: '도면', detailed: '상세도', mechanical: '조립 가이드'
+      };
+      const entries: { key: string; url: string; label: string }[] = [];
+      const seenUrls = new Set<string>();
+      if (Array.isArray(meta?.images)) {
+        meta.images.forEach((url: string, idx: number) => {
+          if (url && !seenUrls.has(url)) { seenUrls.add(url); entries.push({ key: `img_${idx}`, url, label: idx === 0 ? labels.concept : labels.blueprint }); }
+        });
+      }
+      if (meta?.blueprint_url && !seenUrls.has(meta.blueprint_url)) { seenUrls.add(meta.blueprint_url); entries.push({ key: 'blueprint', url: meta.blueprint_url, label: labels.blueprint }); }
+      if (meta?.additional_blueprints?.detailed && !seenUrls.has(meta.additional_blueprints.detailed)) { seenUrls.add(meta.additional_blueprints.detailed); entries.push({ key: 'detailed', url: meta.additional_blueprints.detailed, label: labels.detailed }); }
+      if (meta?.additional_blueprints?.mechanical && !seenUrls.has(meta.additional_blueprints.mechanical)) { seenUrls.add(meta.additional_blueprints.mechanical); entries.push({ key: 'mechanical', url: meta.additional_blueprints.mechanical, label: labels.mechanical }); }
+      setAiImageEntries(entries);
 
       // Set existing assets
       if (initialProject.images && initialProject.images.length > 0) {
@@ -382,9 +461,10 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     try {
       const { data, error } = await supabase
         .from('items')
-        .select('*')
+        .select('id, title, image_url, category, difficulty, created_at, is_public, owner_id, likes, views')
         .neq('category', 'Social') // Filter out community posts
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(50);
 
       if (error) throw error;
 
@@ -551,9 +631,19 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
           }
         }
       }
+      // Build a set of which URLs the user kept (from aiImageEntries after deletions)
+      const survivingUrlSet = new Set(aiImageEntries.map(e => e.url));
 
-      const allImageUrls = [...existingImages, ...uploadedImageUrls];
-      const finalImageUrl = allImageUrls[0] || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80';
+      // metadata.images should ONLY contain the original main display URLs (concept + blueprint)
+      // NOT additional_blueprints — those remain in their own metadata fields
+      const originalMetaImages: string[] = (initialProject?.metadata as any)?.images || existingImages || [];
+      const savedMainImages = [
+        ...originalMetaImages.filter(u => survivingUrlSet.has(u)),  // keep only surviving originals
+        ...uploadedImageUrls                                           // add new uploads
+      ];
+      const allImageUrls = savedMainImages;
+      const finalImageUrl = allImageUrls[0] || initialProject?.image || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80';
+
 
       // 2. Upload Model Files to Cloudflare R2 (Multiple)
       const uploadedModels = [];
@@ -608,18 +698,27 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         is_ai_generated: formData.isAI,
         is_public: true, // Admin uploads are public by default
         metadata: {
+          // 1. Preserve ALL original AI metadata (blueprint, model, materials_list, eco_impact, guide etc.)
+          ...(initialProject?.metadata as any || {}),
+          // 2. Overwrite only the fields that the user actively edits
           fabrication_guide: processedSteps,
-          model_files: allModelFiles, // Store combined files
-          download_url: allModelFiles.length > 0 ? allModelFiles[0].url : '',
-          images: allImageUrls, // Store combined images
+          model_files: allModelFiles,
+          download_url: allModelFiles.length > 0 ? allModelFiles[0].url : (initialProject?.metadata as any)?.download_url || '',
+          images: allImageUrls,
+          // Clear blueprint & additional blueprint URLs if the user deleted them
+          blueprint_url: survivingUrlSet.has((initialProject?.metadata as any)?.blueprint_url) ? (initialProject?.metadata as any)?.blueprint_url : null,
+          additional_blueprints: {
+            detailed: survivingUrlSet.has((initialProject?.metadata as any)?.additional_blueprints?.detailed) ? (initialProject?.metadata as any)?.additional_blueprints?.detailed : null,
+            mechanical: survivingUrlSet.has((initialProject?.metadata as any)?.additional_blueprints?.mechanical) ? (initialProject?.metadata as any)?.additional_blueprints?.mechanical : null,
+          },
           tools: formData.tools,
           material_qty: formData.materialQty,
           material_unit: formData.materialUnit,
           source_location: formData.sourceLocation,
           processing_method: formData.processingMethod,
-          eco_validation: ecoValidation,
-          eco_score: ecoValidation?.recalculated_eco_score || formData.co2,
-          maker_name: initialProject?.maker || userNickname || 'Maker' // Save maker name to DB
+          eco_validation: ecoValidation || (initialProject?.metadata as any)?.eco_validation,
+          eco_score: ecoValidation?.recalculated_eco_score || formData.co2 || (initialProject?.metadata as any)?.eco_score,
+          maker_name: initialProject?.maker || userNickname || (initialProject?.metadata as any)?.maker_name || 'Maker'
         }
       };
 
@@ -988,13 +1087,85 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                   {/* R2 Upload Section (Multiple Files) */}
                   <div className="flex flex-col gap-2">
                     <label className="text-slate-700 text-sm font-semibold ml-2 flex items-center gap-2">
-                      <Box className="w-4 h-4 text-[#f48120]" /> {/* Cloudflare Orange-ish */}
+                      <Box className="w-4 h-4 text-[#f48120]" />
                       {t.basicInfo.modelFile}
                     </label>
+
+                    {/* AI-generated images (from state - supports delete) */}
+                    {aiImageEntries.length > 0 && (
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-semibold text-slate-500 ml-1">🤖 AI 생성 이미지 ({aiImageEntries.length}장)</p>
+                          <label className="cursor-pointer text-xs font-semibold text-[#10b77f] flex items-center gap-1 hover:underline">
+                            <PlusCircle className="w-3.5 h-3.5" /> 이미지 추가
+                            <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageChange} />
+                          </label>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          {aiImageEntries.map((entry) => (
+                            <div key={entry.key} className="relative group/img aspect-video rounded-xl overflow-hidden border border-[#10b77f]/30">
+                              <img src={entry.url} alt={entry.label} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-white text-xs font-bold bg-black/50 px-2 py-1 rounded-full">열기</a>
+                                <button
+                                  type="button"
+                                  onClick={() => setAiImageEntries(prev => prev.filter(e => e.key !== entry.key))}
+                                  className="text-red-400 text-xs font-bold bg-black/50 px-2 py-1 rounded-full hover:text-red-300"
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                              <div className="absolute top-1 left-1 bg-black/70 text-[#10b77f] text-[9px] font-bold px-1.5 py-0.5 rounded-full">{entry.label}</div>
+                            </div>
+                          ))}
+                          {/* Newly added image previews */}
+                          {previewUrls.map((url, idx) => (
+                            <div key={`new_${idx}`} className="relative group/img aspect-video rounded-xl overflow-hidden border border-blue-400/40">
+                              <img src={url} alt={`새 이미지 ${idx + 1}`} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                                <button type="button" onClick={() => removeImage(idx)} className="text-red-400 text-xs font-bold bg-black/50 px-2 py-1 rounded-full">삭제</button>
+                              </div>
+                              <div className="absolute top-1 left-1 bg-blue-500/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">새 이미지</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Existing model files (AI-generated 3D or previously uploaded) */}
+                    {existingModels.length > 0 && (
+                      <div className="mb-3">
+                        <p className="text-xs font-semibold text-slate-500 ml-1 mb-2">📁 저장된 제작 파일</p>
+                        <div className="grid gap-2">
+                          {existingModels.map((file: any, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-white dark:bg-white/5 p-3 rounded-xl border border-[#10b77f]/20 shadow-sm">
+                              <div className="flex items-center gap-3 overflow-hidden">
+                                <div className="bg-[#10b77f]/10 p-1.5 rounded-lg">
+                                  <FileBox className="w-4 h-4 text-[#10b77f]" />
+                                </div>
+                                <div className="flex flex-col items-start min-w-0">
+                                  <span className="font-medium text-sm truncate w-full text-slate-700 dark:text-slate-200">{file.name}</span>
+                                  <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#10b77f] underline">다운로드</a>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeExistingModel(idx)}
+                                className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* New File Drop Zone */}
                     <div className="relative group">
                       <input
                         type="file"
-                        multiple // Enable multiple files
+                        multiple
                         accept=".stl,.obj,.glb,.gltf,.dxf,.dwg,.pdf,.svg,.ai,.png"
                         onChange={handleModelChange}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
@@ -1022,7 +1193,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                                     type="button"
                                     onClick={(e) => {
                                       e.preventDefault();
-                                      e.stopPropagation(); // Stop click from triggering file input
+                                      e.stopPropagation();
                                       removeModelFile(idx);
                                     }}
                                     className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors z-30"

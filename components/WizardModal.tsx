@@ -7,10 +7,13 @@ import {
     generateConceptImages,
     generateBlueprintImage,
     generate3DModel,
-    generateFabricationGuide
+    generateFabricationGuide,
+    generateUpcyclingImage,
+    verifyEcoScore
 } from '../services/aiService';
 import { uploadToR2 } from '../services/r2Storage';
 import { supabase } from '../services/supabase';
+import { config } from '../services/config';
 
 // Icons
 import {
@@ -18,7 +21,7 @@ import {
     ChevronRight, Lamp, Armchair, Sparkles, PenTool, MousePointer2, Settings,
     Palmtree, Type, Minimize, CloudFog, Activity, Grid, Droplets, Scissors,
     Mountain, MonitorPlay, ScanSearch, Star, X, ArrowLeft, ArrowRight,
-    Download, Share2, Recycle
+    Download, Share2, Recycle, ZoomIn
 } from 'lucide-react';
 
 interface WizardModalProps {
@@ -46,24 +49,32 @@ const STYLE_MAPPING: any = {
         { id: 'ethereal', name: '에테리얼 글로우', icon: <CloudFog size={16} />, desc: '반투명 {material} & 몽환적 무드' },
         { id: 'tech_utility', name: '테크니컬 유틸리티', icon: <Activity size={16} />, desc: '전선 노출 & {material}의 조화' },
         { id: 'jeju_volcanic', name: '제주 볼케이닉', icon: <Palmtree size={16} />, desc: '현무암 다공성 텍스처 & 빛샘 효과' },
+        { id: 'pulped_clay', name: '펄프 클레이 (분쇄/배합)', icon: <Droplets size={16} />, desc: '{material}을 갈아 천연 바인더와 빚어낸 찰흙 질감' },
+        { id: 'melted_terrazzo', name: '열압착 멜팅 (분쇄/녹임)', icon: <Grid size={16} />, desc: '부순 {material}을 고온에 녹여 굳힌 다채로운 패턴 덩어리' },
     ],
     furniture: [
         { id: 'modern_nordic', name: '모던 노르딕', icon: <Layers size={16} />, desc: '실용적 라인 & {material}의 온기' },
         { id: 'brutalism', name: '모노리스 브루탈리즘', icon: <Box size={16} />, desc: '압도적 두께 & {material} 덩어리감' },
         { id: 'modular', name: '모듈러 팩토리', icon: <Grid size={16} />, desc: '조립 구조 노출 & 인더스트리얼' },
         { id: 'jeju_olle', name: '제주 올레', icon: <Palmtree size={16} />, desc: '돌담 적층 구조 & 유기적 곡선' },
+        { id: 'pulped_clay', name: '펄프 클레이 (분쇄/배합)', icon: <Droplets size={16} />, desc: '{material}을 갈아 천연 바인더와 빚어낸 찰흙 질감' },
+        { id: 'melted_terrazzo', name: '열압착 멜팅 (분쇄/녹임)', icon: <Grid size={16} />, desc: '부순 {material}을 고온에 녹여 굳힌 다채로운 패턴 덩어리' },
     ],
     interior: [
         { id: 'pop_terrazzo', name: '팝 아트 테라조', icon: <Grid size={16} />, desc: '과감한 컬러 칩 & {material} 패턴' },
         { id: 'craft_clay', name: '크래프트 클레이', icon: <ImageIcon size={16} />, desc: '{material}의 손맛이 느껴지는 질감' },
         { id: 'digital_glitch', name: '디지털 글리치', icon: <MonitorPlay size={16} />, desc: '오류난 듯한 현대적 패턴' },
         { id: 'jeju_ocean', name: '제주 오션', icon: <Palmtree size={16} />, desc: '바다 윤슬 & {material} 레이어링' },
+        { id: 'pulped_clay', name: '펄프 클레이 (분쇄/배합)', icon: <Droplets size={16} />, desc: '{material}을 갈아 천연 바인더와 빚어낸 찰흙 질감' },
+        { id: 'melted_terrazzo', name: '열압착 멜팅 (분쇄/녹임)', icon: <Grid size={16} />, desc: '부순 {material}을 고온에 녹여 굳힌 다채로운 패턴 덩어리' },
     ],
     stationery: [
         { id: 'precision_sleek', name: '프리시전 슬릭', icon: <Scissors size={16} />, desc: '0.1mm 오차 없는 칼각' },
         { id: 'tactile_organic', name: '텍타일 오가닉', icon: <Droplets size={16} />, desc: '손에 감기는 부드러운 곡면' },
         { id: 'color_block', name: '컬러 블록', icon: <Layers size={16} />, desc: '선명한 {material} & 컬러 대비' },
         { id: 'jeju_earth', name: '제주 어스', icon: <Mountain size={16} />, desc: '붉은 흙(송이) 색감 & {material} 질감' },
+        { id: 'pulped_clay', name: '펄프 클레이 (분쇄/배합)', icon: <Droplets size={16} />, desc: '{material}을 갈아 천연 바인더와 빚어낸 찰흙 질감' },
+        { id: 'melted_terrazzo', name: '열압착 멜팅 (분쇄/녹임)', icon: <Grid size={16} />, desc: '부순 {material}을 고온에 녹여 굳힌 다채로운 패턴 덩어리' },
     ],
 };
 
@@ -92,10 +103,11 @@ const WizardModal: React.FC<WizardModalProps> = ({
     const [customRefImage, setCustomRefImage] = useState<File | null>(null);
 
     const [conceptPrompts, setConceptPrompts] = useState<string[]>([]);
-    const [conceptImages, setConceptImages] = useState<string[]>([]);
+    const [conceptImages, setConceptImages] = useState<(string | null)[]>([null, null, null, null]);
     const [selectedConceptIdx, setSelectedConceptIdx] = useState<number | null>(null);
+    const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
-    const [blueprintImage, setBlueprintImage] = useState<string | null>(null);
+    const [blueprintImages, setBlueprintImages] = useState<Record<string, string | null>>({ production: null, detailed: null, mechanical: null });
     const [blueprintType, setBlueprintType] = useState<'production' | 'detailed' | 'mechanical'>('production');
 
     // Final Data
@@ -139,8 +151,8 @@ const WizardModal: React.FC<WizardModalProps> = ({
             setSelectedImage(null);
             setImagePreview('');
             setMaterialAnalysis(null);
-            setConceptImages([]);
-            setBlueprintImage(null);
+            setConceptImages([null, null, null, null]);
+            setBlueprintImages({ production: null, detailed: null, mechanical: null });
             setModel3dUrl(null);
             setIsLoading(false);
             // Reset Custom Inputs
@@ -203,7 +215,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
 
         setIsLoading(true);
         setStep('concepts');
-        setConceptImages([]);
+        setConceptImages([null, null, null, null]);
         addLog("디자인 컨셉을 생성하고 있습니다...");
 
         try {
@@ -231,12 +243,26 @@ const WizardModal: React.FC<WizardModalProps> = ({
             );
             setConceptPrompts(prompts);
             addLog("컨셉 프롬프트 생성 완료. 상세 렌더링을 시작합니다...");
+            setIsLoading(false);
 
-            // 2. Render Images (Parallel)
-            // Note: Currently generateConceptImages doesn't support customRefImage directly unless we modify aiService
-            // For now, we rely on the detailed text prompt.
-            const images = await generateConceptImages(prompts);
-            setConceptImages(images);
+            // 2. Render Images progressively with individual retry (up to 3 times)
+            const generateWithRetry = async (prompt: string, slot: number) => {
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    try {
+                        const img = await generateUpcyclingImage(prompt, config.models.productImage);
+                        if (img) {
+                            setConceptImages(prev => { const next = [...prev]; next[slot] = img; return next; });
+                            addLog(`컨셉 #${slot + 1} 렌더링 완료.`);
+                            return;
+                        }
+                    } catch (e) {
+                        if (attempt < 2) addLog(`컨셉 #${slot + 1} 재시도 중... (${attempt + 1}/3)`);
+                    }
+                }
+                addLog(`컨셉 #${slot + 1} 생성 실패.`);
+            };
+
+            await Promise.all(prompts.slice(0, 4).map((p, i) => generateWithRetry(p, i)));
             addLog("렌더링 완료. 마음에 드는 디자인을 선택해주세요.");
         } catch (e) {
             console.error(e);
@@ -248,22 +274,32 @@ const WizardModal: React.FC<WizardModalProps> = ({
 
     const handleSelectConcept = async (idx: number) => {
         setSelectedConceptIdx(idx);
-        addLog(`컨셉 #${idx + 1} 선택됨. 정밀 도면을 설계 중입니다...`);
+        addLog(`컨셉 #${idx + 1} 선택됨. 제작 가이드 및 생산 도면을 설계 중입니다... (약 15초)`);
 
         setIsLoading(true);
         try {
             const selectedImage = conceptImages[idx];
             const context = conceptPrompts[idx] || "Upcycled Product";
 
-            // Default to 'production' on first load
+            // 1. Generate Guide FIRST to extract realistic dimensions from chosen image
+            const guide = await generateFabricationGuide(materialAnalysis?.material || "Unknown", {
+                desiredOutcome: "Upcycled Object",
+                category: selectedCategory,
+                additionalNotes: `Selected Design Concept Prompt: ${context}. Ensure the guide matches the visual concept.`
+            }, selectedImage);
+            setGuideData(guide);
+            addLog("치수 산출 완료. 생산 도면을 렌더링합니다...");
+
+            // 2. Auto-generate Production Drawing only (detailed & fabrication require token spend)
             setBlueprintType('production');
-            const bp = await generateBlueprintImage(context, selectedImage, 'production');
-            setBlueprintImage(bp);
+            const productionBp = await generateBlueprintImage(context, selectedImage, 'production', guide.product_specs);
+            setBlueprintImages(prev => ({ ...prev, production: productionBp }));
+
             setStep('blueprint');
-            addLog("도면 설계가 완료되었습니다.");
+            addLog("생산 도면이 완료되었습니다. 상세도/조립 가이드는 버튼을 눌러 생성하세요.");
         } catch (e) {
             console.error(e);
-            addLog("도면 생성에 실패했습니다.");
+            addLog("생성에 실패했습니다.");
         } finally {
             setIsLoading(false);
         }
@@ -274,14 +310,16 @@ const WizardModal: React.FC<WizardModalProps> = ({
 
         setBlueprintType(type);
         setIsLoading(true);
-        addLog(`${type === 'production' ? '제작 도면' : type === 'detailed' ? '상세 도면' : '기구 설계 도면'}을 생성하고 있습니다...`);
+        addLog(`${type === 'production' ? '생산 도면' : type === 'detailed' ? '상세도' : '조립 가이드'}을 재생성하고 있습니다...`);
 
         try {
             const selectedImage = conceptImages[selectedConceptIdx];
             const context = conceptPrompts[selectedConceptIdx] || "Upcycled Product";
+            // Use existing production drawing as visual anchor for non-production types
+            const referenceAnchor = type !== 'production' ? (blueprintImages.production ?? undefined) : undefined;
 
-            const bp = await generateBlueprintImage(context, selectedImage, type);
-            setBlueprintImage(bp);
+            const bp = await generateBlueprintImage(context, selectedImage, type, guideData?.product_specs, referenceAnchor);
+            setBlueprintImages(prev => ({ ...prev, [type]: bp }));
             addLog("도면이 업데이트되었습니다.");
         } catch (e) {
             console.error(e);
@@ -292,42 +330,18 @@ const WizardModal: React.FC<WizardModalProps> = ({
     };
 
     // 3D generation is now moved to ProjectDetail execution.
-    // This handler generates the guide and saves the project directly.
+    // This handler saves the project directly.
     const handleSkip3D = async () => {
         if (selectedConceptIdx === null) return;
         setIsLoading(true);
-        addLog("AI가 제작 가이드를 생성하고 분석 결과를 정리중입니다... (약 10초)");
+        addLog("프로젝트를 저장하고 업로드합니다...");
 
         try {
-            const selectedPrompt = conceptPrompts[selectedConceptIdx] || "";
-
-            // Generate Guide
-            const guide = await generateFabricationGuide(materialAnalysis?.material || "Unknown", {
-                desiredOutcome: "Upcycled Object",
-                category: selectedCategory,
-                additionalNotes: `Selected Design Concept Prompt: ${selectedPrompt}. Ensure the guide matches the visual concept.`
-            });
-
-            // Even if guide is partial, we proceed
-            setGuideData(guide);
-            addLog("프로젝트를 저장하고 업로드합니다...");
-
-            // Proceed to save - handleSaveProject handles the finalization
-            await handleSaveProject(null, guide);
-
+            // Guide logic is already completed in handleSelectConcept
+            await handleSaveProject(null, guideData);
         } catch (e) {
-            console.error("Guide Generation Failed", e);
-            addLog("가이드 생성에 실패했습니다. 기본 템플릿으로 저장합니다.");
-
-            // Fallback save
-            const fallbackGuide = {
-                title: `${materialAnalysis?.material} 업사이클 프로젝트`,
-                steps: [{ title: '프로젝트 시작', desc: '분석된 재료를 바탕으로 아이디어를 구체화하세요.' }],
-                difficulty: 'Medium',
-                estimated_time: '1h',
-                tools: '기본 공구'
-            };
-            await handleSaveProject(null, fallbackGuide);
+            console.error("Save Failed", e);
+            addLog("저장에 실패했습니다.");
         } finally {
             setIsLoading(false);
         }
@@ -346,9 +360,10 @@ const WizardModal: React.FC<WizardModalProps> = ({
             );
 
             let r2BlueprintUrl = '';
-            if (blueprintImage) {
+            const currentBpImage = blueprintImages.production;
+            if (currentBpImage) {
                 r2BlueprintUrl = await uploadToR2(
-                    await (await fetch(blueprintImage)).blob() as File,
+                    await (await fetch(currentBpImage)).blob() as File,
                     'ai-generated'
                 );
             }
@@ -365,12 +380,29 @@ const WizardModal: React.FC<WizardModalProps> = ({
                 || (safeGuide.steps?.[0]?.desc ? safeGuide.steps[0].desc.slice(0, 150) + "..." : null)
                 || '제주에서 영감을 받은 업사이클링 프로젝트입니다.';
 
+            // --- Eco Score Verification ---
+            let ecoValidationData: any = null;
+            try {
+                addLog("환경 기여도 정밀 분석 중...");
+                const resultText = await verifyEcoScore({
+                    title: safeGuide.title || `${materialAnalysis?.material || 'Upcycle'} Project`,
+                    material: materialAnalysis?.material || 'unknown',
+                    qty: "1 Unit", // Define a simple default since it's an AI-generated idea
+                    location: safeGuide.recommended_source || 'Jeju Island',
+                    steps: safeSteps
+                });
+                ecoValidationData = resultText;
+            } catch (ecoErr) {
+                console.warn("Eco verification failed in Wizard, fallback to initial scores", ecoErr);
+            }
+
             const projectData = {
                 title: safeGuide.title || `${materialAnalysis?.material || 'Upcycle'} Project`,
                 material: materialAnalysis?.material || 'unknown',
                 category: selectedCategory,
                 estimated_time: safeGuide.estimated_time || '2h', // Default 2h
                 difficulty: ['Easy', 'Medium', 'Hard'].includes(safeGuide.difficulty) ? safeGuide.difficulty : 'Medium',
+                co2_reduction: ecoValidationData?.co2_saved_kg || parseFloat(safeGuide.co2_reduction || "0") || 0,
                 image_url: r2ConceptUrl,
                 metadata: {
                     description: safeDescription,
@@ -385,7 +417,8 @@ const WizardModal: React.FC<WizardModalProps> = ({
                     style: selectedStyle,
                     source_location: safeGuide.recommended_source || 'Jeju Island',
                     eco_impact: safeGuide.eco_impact || { score: 'B', visual_analogy: '지구를 위한 작은 실천' },
-                    eco_score: safeGuide.eco_impact?.score || 'B',
+                    eco_score: ecoValidationData?.recalculated_eco_score || safeGuide.eco_impact?.score || 'B',
+                    eco_validation: ecoValidationData,
                     materials_list: Array.isArray(safeGuide.materials) ? safeGuide.materials : [{ item: materialAnalysis?.material || 'Main Material', estimated_qty: '1' }]
                 },
                 is_ai_generated: true,
@@ -441,6 +474,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
     // --- Render Logic ---
 
     return (
+        <>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
             <div className="bg-[#FDFCFB] dark:bg-[#1A1A1A] w-full max-w-5xl h-[85vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden border border-white/20 relative">
 
@@ -675,51 +709,74 @@ const WizardModal: React.FC<WizardModalProps> = ({
                     {step === 'concepts' && (
                         <div className="h-full flex flex-col">
                             <h3 className="text-center text-2xl font-bold text-gray-900 dark:text-white mb-8 animate-fade-in-up">
-                                Select Your Favorite Design
+                                마음에 드는 디자인을 선택하세요
                             </h3>
 
                             <div className="flex-1 w-full flex flex-col overflow-hidden">
                                 {/* Mobile: Horizontal Snapping Carousel */}
                                 <div className="md:hidden flex-1 w-full overflow-x-auto snap-x snap-mandatory scrollbar-hide flex items-center px-[10vw] gap-4 pb-8">
-                                    {conceptImages.map((img, idx) => (
+                                    {[0,1,2,3].map((idx) => {
+                                        const img = conceptImages[idx];
+                                        return (
                                         <div
                                             key={idx}
-                                            onClick={() => handleSelectConcept(idx)}
-                                            className="relative flex-shrink-0 w-[80vw] aspect-[3/4] rounded-[2rem] overflow-hidden snap-center shadow-xl transition-all duration-500 border-4 border-transparent hover:border-emerald-400 group"
+                                            className="relative flex-shrink-0 w-[80vw] aspect-[3/4] rounded-[2rem] overflow-hidden snap-center shadow-xl transition-all duration-500 border-4 border-transparent hover:border-emerald-400 group bg-gray-100 dark:bg-gray-700"
                                         >
-                                            <img src={img} className="w-full h-full object-cover" />
-                                            {/* Glassmorphism Selection Overlay */}
-                                            <div className={`absolute inset-0 flex items-end justify-center p-6 bg-gradient-to-t from-black/60 to-transparent transition-opacity duration-300 ${selectedConceptIdx === idx ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                                                <div className="w-full bg-white/20 backdrop-blur-md border border-white/30 text-white py-3 rounded-xl font-bold text-center shadow-lg">
-                                                    {selectedConceptIdx === idx ? 'Selected' : 'Select Design'}
+                                            {img ? (
+                                                <>
+                                                    <img src={img} className="w-full h-full object-contain" onClick={() => handleSelectConcept(idx)} />
+                                                    <button onClick={(e) => { e.stopPropagation(); setLightboxIdx(idx); }} className="absolute top-3 right-3 bg-black/50 hover:bg-black/80 text-white p-2 rounded-full backdrop-blur-sm transition-all z-10"><ZoomIn size={16} /></button>
+                                                </>
+                                            ) : (
+                                                <div className="w-full h-full flex flex-col items-center justify-center gap-2">
+                                                    <RefreshCw size={32} className="text-emerald-400 animate-spin" />
+                                                    <span className="text-xs text-gray-400 font-bold">렌더링 중...</span>
                                                 </div>
-                                            </div>
-                                            {/* Active Indicator */}
+                                            )}
+                                            {img && (
+                                                <div className={`absolute inset-0 flex items-end justify-center p-6 bg-gradient-to-t from-black/60 to-transparent transition-opacity duration-300 pointer-events-none ${selectedConceptIdx === idx ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                    <div className="w-full bg-white/20 backdrop-blur-md border border-white/30 text-white py-3 rounded-xl font-bold text-center shadow-lg">
+                                                        {selectedConceptIdx === idx ? '선택됨' : '디자인 선택'}
+                                                    </div>
+                                                </div>
+                                            )}
                                             {selectedConceptIdx === idx && (
-                                                <div className="absolute top-4 right-4 bg-emerald-500 text-white p-2 rounded-full shadow-lg animate-bounce">
+                                                <div className="absolute top-4 right-14 bg-emerald-500 text-white p-2 rounded-full shadow-lg animate-bounce pointer-events-none">
                                                     <CheckCircle size={20} />
                                                 </div>
                                             )}
                                         </div>
-                                    ))}
+                                    )})}
                                 </div>
 
-                                {/* Desktop: Grid Layout (Existing) */}
+                                {/* Desktop: Grid Layout */}
                                 <div className="hidden md:grid grid-cols-2 gap-6 max-w-4xl mx-auto w-full overflow-y-auto custom-scrollbar pr-2 pb-4">
-                                    {conceptImages.map((img, idx) => (
+                                    {[0,1,2,3].map((idx) => {
+                                        const img = conceptImages[idx];
+                                        return (
                                         <div
                                             key={idx}
-                                            onClick={() => handleSelectConcept(idx)}
-                                            className={`group relative rounded-[2rem] overflow-hidden cursor-pointer shadow-lg hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-4 bg-white aspect-[4/3] ${selectedConceptIdx === idx ? 'border-emerald-500 ring-4 ring-emerald-500/20' : 'border-transparent hover:border-emerald-400'}`}
+                                            className={`group relative rounded-[2rem] overflow-hidden cursor-pointer shadow-lg hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-4 bg-white dark:bg-gray-800 aspect-[4/3] flex items-center justify-center ${selectedConceptIdx === idx ? 'border-emerald-500 ring-4 ring-emerald-500/20' : 'border-transparent hover:border-emerald-400'}`}
                                         >
-                                            <img src={img} className="w-full h-full object-cover" />
-                                            <div className={`absolute inset-0 bg-black/40 transition-opacity flex items-center justify-center ${selectedConceptIdx === idx ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                                                <div className="bg-white text-gray-900 px-6 py-3 rounded-full font-bold shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform">
-                                                    {selectedConceptIdx === idx ? 'Selected' : 'Select This'}
+                                            {img ? (
+                                                <>
+                                                    <img src={img} className="w-full h-full object-contain" onClick={() => handleSelectConcept(idx)} />
+                                                    <button onClick={(e) => { e.stopPropagation(); setLightboxIdx(idx); }} className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-sm transition-all z-10"><ZoomIn size={16} /></button>
+                                                    <div className={`absolute inset-0 bg-black/40 transition-opacity flex flex-col items-center justify-center pointer-events-none ${selectedConceptIdx === idx ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                        <div className="bg-white text-gray-900 px-6 py-3 rounded-full font-bold shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform">
+                                                            {selectedConceptIdx === idx ? '선택됨 ✓' : '이것을 선택'}
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="w-full h-full flex flex-col items-center justify-center gap-3">
+                                                    <RefreshCw size={36} className="text-emerald-400 animate-spin" />
+                                                    <span className="text-sm text-gray-400 font-bold">렌더링 중...</span>
                                                 </div>
-                                            </div>
+                                            )}
                                         </div>
-                                    ))}
+                                    );
+                                    })}
                                 </div>
                             </div>
                             {isLoading && (
@@ -734,7 +791,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                     )}
 
                     {/* Step 4: Blueprint & 3D Choice */}
-                    {step === 'blueprint' && blueprintImage && (
+                    {step === 'blueprint' && (
                         <div className="h-full flex flex-col gap-8 animate-fade-in overflow-y-auto custom-scrollbar p-1">
                             {/* Blueprint View (Full Width) */}
                             <div className="flex flex-col gap-4 w-full">
@@ -742,14 +799,14 @@ const WizardModal: React.FC<WizardModalProps> = ({
 
                                 <div className="bg-blue-900/5 rounded-[2.5rem] p-6 lg:p-8 border border-blue-900/10 flex flex-col relative overflow-hidden min-h-[400px] lg:min-h-[600px] w-full max-w-5xl mx-auto shadow-sm">
                                     <h4 className="text-blue-900 dark:text-blue-200 font-black tracking-widest uppercase mb-4 opacity-50 text-xs lg:text-sm">
-                                        ISO 128 • Production Drawing
+                                        ISO 128 • {blueprintType === 'production' ? '생산 도면' : blueprintType === 'detailed' ? '상세도' : '조립 가이드'}
                                     </h4>
                                     {isLoading && step === 'blueprint' ? (
                                         <div className="flex-1 flex items-center justify-center">
                                             <RefreshCw className="animate-spin text-blue-500" size={48} />
                                         </div>
                                     ) : (
-                                        <img src={blueprintImage} className="flex-1 object-contain mix-blend-multiply dark:mix-blend-normal w-full" />
+                                        <img src={blueprintImages[blueprintType] as string} className="flex-1 object-contain mix-blend-multiply dark:mix-blend-normal w-full" />
                                     )}
                                     <div className="absolute bottom-6 right-6 flex gap-2">
                                         <span className="bg-white/80 dark:bg-black/50 backdrop-blur px-3 py-1 rounded text-[10px] font-mono border">SCALE 1:5</span>
@@ -758,11 +815,11 @@ const WizardModal: React.FC<WizardModalProps> = ({
                             </div>
 
                             {/* Actions (Centered Below) */}
-                            <div className="flex flex-col justify-center space-y-6 w-full max-w-2xl mx-auto text-center pb-8">
+                             <div className="flex flex-col justify-center space-y-6 w-full max-w-2xl mx-auto text-center pb-8">
                                 <div>
-                                    <h2 className="text-3xl lg:text-4xl font-black text-gray-900 dark:text-white mb-2 lg:mb-4">Ready to Build?</h2>
+                                    <h2 className="text-3xl lg:text-4xl font-black text-gray-900 dark:text-white mb-2 lg:mb-4">제작 준비가 되셨나요?</h2>
                                     <p className="text-lg lg:text-xl text-gray-500 dark:text-gray-400 font-medium">
-                                        Save your project to the library.
+                                        프로젝트를 서재에 저장하고 제작을 시작하세요.
                                     </p>
                                 </div>
 
@@ -773,7 +830,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                                         className="w-full py-6 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-xl shadow-xl shadow-blue-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-3"
                                     >
                                         {isLoading ? <RefreshCw className="animate-spin" /> : <CheckCircle size={24} className="fill-white/20" />}
-                                        Save to Library
+                                        서재에 저장하기
                                     </button>
                                 </div>
                             </div>
@@ -803,6 +860,25 @@ const WizardModal: React.FC<WizardModalProps> = ({
 
             </div>
         </div>
+
+        {/* Lightbox Overlay */}
+        {lightboxIdx !== null && conceptImages[lightboxIdx] && (
+            <div
+                className="fixed inset-0 z-[999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
+                onClick={() => setLightboxIdx(null)}
+            >
+                <button className="absolute top-6 right-6 bg-white/20 hover:bg-white/40 text-white p-3 rounded-full transition-all z-10" onClick={() => setLightboxIdx(null)}>
+                    <X size={24} />
+                </button>
+                <img
+                    src={conceptImages[lightboxIdx] as string}
+                    className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
+                    onClick={(e) => e.stopPropagation()}
+                />
+                <div className="absolute bottom-6 text-white/60 text-sm font-mono">컨셉 #{lightboxIdx + 1} • 클릭하거나 X를 눌러 닫기</div>
+            </div>
+        )}
+        </>
     );
 };
 

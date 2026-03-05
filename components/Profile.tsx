@@ -21,6 +21,7 @@ interface ProfileProps {
     onPublish: (projectId: string) => void;
     onDelete: (projectId: string) => void;
     onEdit: (project: Project) => void;
+    onProfileUpdate?: () => void;
 }
 
 const TRANSLATIONS = {
@@ -42,7 +43,9 @@ const TRANSLATIONS = {
         cancel: '취소',
         changePhoto: '사진 변경',
         uploading: '업로드 중...',
-        logout: '로그아웃'
+        logout: '로그아웃',
+        projects: '개의 프로젝트',
+        newProject: '새 프로젝트'
     },
     en: {
         title: 'My Profile',
@@ -62,7 +65,9 @@ const TRANSLATIONS = {
         cancel: 'Cancel',
         changePhoto: 'Change Photo',
         uploading: 'Uploading...',
-        logout: 'Log Out'
+        logout: 'Log Out',
+        projects: 'Projects',
+        newProject: 'New Project'
     }
 };
 
@@ -78,7 +83,8 @@ const Profile: React.FC<ProfileProps> = ({
     myProjects,
     onPublish,
     onDelete,
-    onEdit
+    onEdit,
+    onProfileUpdate
 }) => {
     const t = TRANSLATIONS[language];
 
@@ -198,7 +204,8 @@ const Profile: React.FC<ProfileProps> = ({
                     id: item.id,
                     maker: displayName,
                     metadata: {
-                        ...item.metadata,
+                        ...(item.metadata || {}),
+                        maker_name: displayName,
                         maker_avatar_url: avatarUrl
                     }
                 }));
@@ -216,6 +223,11 @@ const Profile: React.FC<ProfileProps> = ({
 
             setIsEditing(false);
             alert(language === 'ko' ? '프로필이 저장되었습니다!' : 'Profile saved successfully!');
+            
+            // Notify parent to refresh global user profile state
+            if (onProfileUpdate) {
+                onProfileUpdate();
+            }
         } catch (error) {
             console.error('Failed to update profile:', error);
             alert('Failed to save profile. Please try again.');
@@ -329,7 +341,7 @@ const Profile: React.FC<ProfileProps> = ({
                                     {userTokens}
                                 </span>
                                 <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
-                                    {myProjects.length} Projects
+                                    {myProjects.length}{t.projects}
                                 </span>
                             </div>
                         </div>
@@ -363,7 +375,7 @@ const Profile: React.FC<ProfileProps> = ({
                         <div className="w-12 h-12 rounded-full bg-white dark:bg-gray-700 shadow-sm flex items-center justify-center group-hover:scale-110 transition-transform">
                             <span className="material-icons-round text-2xl text-gray-400 dark:text-gray-300 group-hover:text-primary">add</span>
                         </div>
-                        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">New Project</span>
+                        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{t.newProject}</span>
                     </button>
 
                     {/* Project Items */}

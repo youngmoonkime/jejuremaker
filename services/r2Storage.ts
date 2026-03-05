@@ -1,104 +1,71 @@
-import { supabase } from './supabase';
-import { config } from './config';
+import { config } from "./config";
 
 export const isR2Configured = () => {
-  return !!config.r2.publicDomain;
+    return !!config.r2.publicDomain;
 };
 
-export type StorageType = 'hub' | 'lab';
-
-// Direct upload fallback (uses client-side S3 SDK when Edge Function is unavailable)
-const directUploadToR2 = async (
-    file: File | Blob,
-    folder: string,
-    type: StorageType
-): Promise<string> => {
-    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
-
-    const R2_CONFIG = { hub: config.r2, lab: config.labR2 };
-    const currentConfig = R2_CONFIG[type];
-
-    if (!currentConfig.accountId || !currentConfig.accessKeyId) {
-        throw new Error(`R2 configuration for ${type} is missing. Please check .env file.`);
-    }
-
-    const s3Client = new S3Client({
-        region: "auto",
-        endpoint: `https://${currentConfig.accountId}.r2.cloudflarestorage.com`,
-        credentials: {
-            accessKeyId: currentConfig.accessKeyId,
-            secretAccessKey: currentConfig.secretAccessKey,
-        },
-    });
-
-    let fileName = '';
-    if (file instanceof File) {
-        fileName = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-    } else {
-        const ext = file.type === 'image/webp' ? 'webp' : file.type === 'model/gltf-binary' ? 'glb' : 'bin';
-        fileName = `${Date.now()}_generated.${ext}`;
-    }
-
-    const key = `${folder}/${fileName}`;
-
-    const command = new PutObjectCommand({
-        Bucket: currentConfig.bucketName,
-        Key: key,
-        Body: file,
-        ContentType: file.type,
-    });
-
-    await s3Client.send(command);
-
-    return `${currentConfig.publicDomain}/${key}`;
-};
+export type StorageType = "hub" | "lab";
 
 export const uploadToR2 = async (
-    file: File | Blob, 
-    folder: string = 'models', 
-    type: StorageType = 'hub'
+    file: File | Blob,
+    folder: string = "models",
+    type: StorageType = "hub",
 ): Promise<string> => {
-    
     // Generate file name
-    let fileName = '';
+    let fileName = "";
     if (file instanceof File) {
-        fileName = file.name.replace(/\s+/g, '_');
+        fileName = file.name.replace(/\s+/g, "_");
     } else {
-        const ext = file.type === 'image/webp' ? 'webp' : file.type === 'model/gltf-binary' ? 'glb' : 'bin';
+        const ext = file.type === "image/webp"
+            ? "webp"
+            : file.type === "model/gltf-binary"
+            ? "glb"
+            : "bin";
         fileName = `generated.${ext}`;
     }
 
-    // Try Edge Function first (secure path — no keys exposed)
-    try {
-        const { data, error } = await supabase.functions.invoke('upload-r2', {
-            body: {
-                fileName,
-                fileType: file.type || 'application/octet-stream',
-                folder,
+    // 1. Prepare FormData for proxy upload
+    const formData = new FormData();
+    formData.append("file", file, fileName);
+    formData.append("folder", folder);
+
+    // 2. Send directly to Supabase Edge Function (Proxy)
+    // This completely bypasses browser ad-blockers and local CORS issues
+    const response = await fetch(
+        `${config.supabase.url}/functions/v1/upload-r2`,
+        {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${config.supabase.anonKey}`,
+                // IMPORTANT: Do NOT set Content-Type manually.
+                // Browser automatically sets 'multipart/form-data' with the correct boundary.
             },
-        });
+            body: formData,
+        },
+    );
 
-        if (!error && data?.uploadUrl) {
-            // Upload file directly to R2 using the presigned URL
-            const uploadResponse = await fetch(data.uploadUrl, {
-                method: 'PUT',
-                body: file,
-                headers: {
-                    'Content-Type': file.type || 'application/octet-stream',
-                },
-            });
-
-            if (uploadResponse.ok) {
-                return data.publicUrl;
-            }
-            console.warn('Presigned URL upload failed, falling back to direct upload');
-        } else {
-            console.warn('Edge Function unavailable, falling back to direct upload:', error?.message || data?.error);
-        }
-    } catch (edgeFnError) {
-        console.warn('Edge Function call failed, falling back to direct upload:', edgeFnError);
+    const responseText = await response.text();
+    let data;
+    try {
+        data = JSON.parse(responseText);
+    } catch (parseError) {
+        throw new Error(
+            `Proxy Upload Server Error (Not JSON format): ${
+                responseText.substring(0, 100)
+            }...`,
+        );
     }
 
-    // Fallback: direct S3 upload (dynamically imports SDK)
-    return directUploadToR2(file, folder, type);
+    if (!response.ok || !data?.publicUrl) {
+        throw new Error(
+            `Proxy Upload Error: ${
+                data?.error || response.statusText ||
+                "Failed to upload file to proxy server"
+            }`,
+        );
+    }
+
+    return data.publicUrl;
+
+    return data.publicUrl;
 };

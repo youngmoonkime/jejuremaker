@@ -10,6 +10,7 @@ import { config } from '../services/config';
 interface LayoutProps {
     children: React.ReactNode;
     user: User | null;
+    userProfile?: { nickname: string; avatarUrl: string } | null;
     userTokens: number;
     language: Language;
     toggleLanguage: () => void;
@@ -20,19 +21,25 @@ interface LayoutProps {
     onLogout: () => void;
     makers: Maker[];
     onAnalyzeClick: () => void;
+    sendMessageToMaker: (maker: Maker) => void;
     showWizard: boolean;
     setShowWizard: (show: boolean) => void;
+    projects: Project[];
     // Wizard props
     setUserTokens: (tokens: number) => void;
     onAddProject: (project: Project) => void;
     currentView: string;
     onSearch?: (term: string) => void;
     onCancel?: () => void;
+    notifications?: any[];
+    onNotificationClick?: (projectId: string, notifId: string) => void;
+    onDeleteNotification?: (notifId: string) => void;
 }
 
 const Layout: React.FC<LayoutProps> = ({
     children,
     user,
+    userProfile,
     userTokens,
     language,
     toggleLanguage,
@@ -43,19 +50,25 @@ const Layout: React.FC<LayoutProps> = ({
     onLogout,
     makers,
     onAnalyzeClick,
+    sendMessageToMaker,
     showWizard,
     setShowWizard,
+    projects,
     setUserTokens,
     onAddProject,
     currentView,
     onSearch,
-    onCancel
+    onCancel,
+    notifications,
+    onNotificationClick,
+    onDeleteNotification
 }) => {
     return (
         <div className={`min-h-screen text-gray-800 dark:text-gray-100 bg-background-light dark:bg-background-dark transition-colors duration-300`}>
-            {currentView !== 'upload' && (
+            {(currentView !== 'upload' && currentView !== 'lab' && currentView !== 'workspace') && (
                 <Header
                     user={user}
+                    userProfile={userProfile}
                     userTokens={userTokens}
                     language={language}
                     toggleLanguage={toggleLanguage}
@@ -66,10 +79,14 @@ const Layout: React.FC<LayoutProps> = ({
                     onLogout={onLogout}
                     onSearch={onSearch}
                     currentView={currentView}
+                    notifications={notifications}
+                    onNotificationClick={onNotificationClick}
+                    onDeleteNotification={onDeleteNotification}
+                    projects={projects}
                 />
             )}
 
-            <div className={(currentView === 'upload' || currentView === 'lab') ? 'w-full h-screen' : "max-w-[1600px] mx-auto pt-20 lg:pt-24 pb-24 lg:pb-12 px-4 lg:px-6 flex flex-col lg:flex-row lg:gap-10"}>
+            <div className={(currentView === 'upload' || currentView === 'lab' || currentView === 'workspace') ? 'w-full h-screen' : "max-w-[1600px] mx-auto pt-20 lg:pt-24 pb-24 lg:pb-12 px-4 lg:px-6 flex flex-col lg:flex-row lg:gap-10"}>
                 {(currentView !== 'upload' && currentView !== 'lab') && (
                     <>
                         {/* Desktop Sidebar */}
@@ -78,7 +95,9 @@ const Layout: React.FC<LayoutProps> = ({
                             onNavigate={onNavigate}
                             makers={makers}
                             onAnalyzeClick={onAnalyzeClick}
+                            sendMessageToMaker={sendMessageToMaker}
                             currentView={currentView}
+                            currentUserId={user?.id}
                         />
 
                         {/* Mobile Bottom Navigation */}

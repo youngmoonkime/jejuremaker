@@ -4,6 +4,8 @@ export interface Maker {
   projects: number;
   likes: string;
   rank?: number;
+  userId?: string;
+  rawLikes?: number;
 }
 
 export interface Step {
@@ -29,12 +31,13 @@ export interface Project {
   images?: string[]; // 여러 이미지 지원
   category: string;
   time: string;
-  difficulty: 'Easy' | 'Medium' | 'Hard';
+  difficulty: "Easy" | "Medium" | "Hard";
   likes?: number; // 좋아요 수
   views?: number; // 조회수
   isAiRemix?: boolean;
   isAiIdea?: boolean;
   description?: string;
+  fabricationGuide?: string;
   steps?: Step[];
   downloadUrl?: string; // 하위 호환성을 위해 유지
   modelFiles?: ModelFile[]; // 여러 파일 지원
@@ -42,6 +45,7 @@ export interface Project {
   ownerId?: string; // 소유자 ID
   createdAt?: string; // 생성 날짜
   metadata?: any; // 추가 메타데이터 (Blueprint URL 등)
+  makerAvatarUrl?: string; // 작성자 커스텀 아바타
   commentsCount?: number; // 댓글 수
   tools?: string;
   material?: string;
@@ -54,16 +58,16 @@ export type SocialPost = Project;
 
 export interface Message {
   id: string;
-  sender: 'user' | 'expert' | 'ai' | 'system';
+  sender: "user" | "expert" | "ai" | "system";
   text?: string;
   timestamp: string;
   avatar?: string;
   attachmentName?: string;
-  attachmentType?: 'image' | '3d_model'; // Added for AI generation results
+  attachmentType?: "image" | "3d_model"; // Added for AI generation results
   attachmentUrl?: string;
 }
 
-export type ChatMode = 'human' | 'ai';
+export type ChatMode = "human" | "ai";
 
 // Wizard System Types
 export interface MaterialAnalysis {
@@ -72,11 +76,11 @@ export interface MaterialAnalysis {
   confidence: number; // 신뢰도
   traits?: string; // 소재 DNA 분석 결과 (질감, 색상, 특징 등)
   recommendations?: { // 카테고리별 추천 스타일 ID
-      lighting?: string;
-      furniture?: string;
-      interior?: string;
-      stationery?: string;
-      [key: string]: string | undefined;
+    lighting?: string;
+    furniture?: string;
+    interior?: string;
+    stationery?: string;
+    [key: string]: string | undefined;
   };
 }
 
@@ -93,4 +97,11 @@ export interface CategoryRecommendation {
   suggestions: string[];
 }
 
-export type WizardStep = 'material' | 'analysis_result' | 'concepts' | 'blueprint' | '3d_choice' | 'generation' | 'final';
+export type WizardStep =
+  | "material"
+  | "analysis_result"
+  | "concepts"
+  | "blueprint"
+  | "3d_choice"
+  | "generation"
+  | "final";

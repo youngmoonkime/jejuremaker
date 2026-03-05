@@ -1,7 +1,11 @@
 // @ts-nocheck
 // Note: This file runs in Supabase Edge Functions (Deno runtime), not Node.js.
+// 'Cannot find name Deno' or HTTPS import errors in VSCode are expected unless the Deno extension is installed.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+
+// AWS Signature V4 implementation for generating presigned URLs
+// No external SDK dependency — pure Deno crypto
 
 const encoder = new TextEncoder();
 
@@ -67,9 +71,6 @@ async function generatePresignedUrl(
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const credential = `${accessKeyId}/${credentialScope}`;
 
-  // Content-Type must be consistently handled
-  const lowerContentType = contentType.toLowerCase().trim();
-
   const queryParams = new URLSearchParams({
     "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
     "X-Amz-Credential": credential,
@@ -78,14 +79,13 @@ async function generatePresignedUrl(
     "X-Amz-SignedHeaders": "content-type;host",
   });
 
+  // Sort query params
   const sortedParams = new URLSearchParams([...queryParams.entries()].sort());
   const canonicalQueryString = sortedParams.toString();
 
-  const canonicalHeaders = `content-type:${lowerContentType}\nhost:${host}\n`;
+  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
   const signedHeaders = "content-type;host";
 
-  // Note: key must be correctly encoded if it contains special characters
-  // However, we sanitize it before calling this.
   const canonicalRequest = [
     method,
     `/${bucketName}/${key}`,
@@ -136,7 +136,8 @@ serve(async (req) => {
     ) {
       return new Response(
         JSON.stringify({
-          error: "R2 configuration missing in environment variables.",
+          error:
+            "R2 configuration missing. Set secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME",
         }),
         {
           status: 500,
@@ -145,10 +146,10 @@ serve(async (req) => {
       );
     }
 
-    const contentTypeHeader = (req.headers.get("content-type") || "")
-      .toLowerCase();
+    const contentType = (req.headers.get("content-type") || "").toLowerCase();
 
-    if (contentTypeHeader.includes("multipart/form-data")) {
+    // 1. Proxy Upload Path (Bypasses Browser CORS / AdBlockers)
+    if (contentType.includes("multipart/form-data")) {
       let formData;
       try {
         formData = await req.formData();
@@ -159,16 +160,11 @@ serve(async (req) => {
       const file = formData.get("file") as File;
       const folder = formData.get("folder") as string || "uploads";
 
-      if (!file) throw new Error("[ERR_NO_FILE] No file found in FormData");
+      if (!file) throw new Error("[ERR_NO_FILE] No file found in formData");
 
-      // Robust filename sanitization
-      const originalName = file.name || "upload.bin";
-      const fileType = (file.type || "application/octet-stream").toLowerCase()
-        .trim();
-
-      // Sanitization: replace anything not alphanumeric, dot, or dash with underscore
-      const sanitizedName = originalName.replace(/[^a-zA-Z0-9\.\-]/g, "_");
-      const key = `${folder}/${Date.now()}_${sanitizedName}`;
+      const fileName = file.name || "upload.bin";
+      const fileType = file.type || "application/octet-stream";
+      const key = `${folder}/${Date.now()}_${fileName.replace(/\\s+/g, "_")}`;
 
       const signedUrl = await generatePresignedUrl(
         R2_ACCOUNT_ID,
@@ -181,6 +177,7 @@ serve(async (req) => {
 
       let r2Response;
       try {
+        // Edge Function (Server) uploads directly to R2
         r2Response = await fetch(signedUrl, {
           method: "PUT",
           headers: {
@@ -189,41 +186,46 @@ serve(async (req) => {
           body: await file.arrayBuffer(),
         });
       } catch (e) {
-        throw new Error(
-          `[ERR_R2_FETCH] Network error or timeout: ${e.message}`,
-        );
+        throw new Error(`[ERR_R2_FETCH] ${e.message}`);
       }
 
       if (!r2Response.ok) {
-        const errorBody = await r2Response.text();
-        console.error(`R2 Error (${r2Response.status}):`, errorBody);
         throw new Error(
-          `[ERR_R2_UPLOAD] R2 rejected the upload (${r2Response.status}). Details: ${
-            errorBody.substring(0, 200)
-          }`,
+          `[ERR_R2_UPLOAD] Proxy upload failed: ${r2Response.statusText}`,
         );
       }
 
       return new Response(
         JSON.stringify({
           publicUrl: `https://${
-            R2_PUBLIC_DOMAIN.replace(/^https?:\/\//, "")
+            R2_PUBLIC_DOMAIN || "pub-b7d22eda2a2840a99f84fad5136127e0.r2.dev"
           }/${key}`,
           key: key,
+          v: "V3",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // Presigned URL request (JSON body)
+    // 2. Legacy Presigned URL Path (Browser uploads directly)
+    let bodyText;
+    try {
+      bodyText = await req.text();
+    } catch (e) {
+      throw new Error(`[ERR_READ_BODY] ${e.message}`);
+    }
+
     let payload;
     try {
-      payload = await req.json();
+      payload = JSON.parse(bodyText);
     } catch (e) {
-      throw new Error(`[ERR_JSON_PARSE] Invalid JSON: ${e.message}`);
+      throw new Error(
+        `[ERR_JSON_PARSE] Invalid JSON payload. Content-Type was: '${contentType}'. Parsing error: ${e.message}`,
+      );
     }
 
     const { fileName, fileType, folder = "uploads" } = payload;
+
     if (!fileName || !fileType) {
       return new Response(
         JSON.stringify({ error: "Missing fileName or fileType" }),
@@ -234,8 +236,7 @@ serve(async (req) => {
       );
     }
 
-    const sanitizedName = fileName.replace(/[^a-zA-Z0-9\.\-]/g, "_");
-    const key = `${folder}/${Date.now()}_${sanitizedName}`;
+    const key = `${folder}/${Date.now()}_${fileName}`;
 
     const signedUrl = await generatePresignedUrl(
       R2_ACCOUNT_ID,
@@ -243,23 +244,23 @@ serve(async (req) => {
       R2_SECRET_ACCESS_KEY,
       R2_BUCKET_NAME,
       key,
-      fileType.toLowerCase().trim(),
+      fileType,
     );
 
     return new Response(
       JSON.stringify({
         uploadUrl: signedUrl,
         publicUrl: `https://${
-          R2_PUBLIC_DOMAIN.replace(/^https?:\/\//, "")
+          R2_PUBLIC_DOMAIN || "pub-b7d22eda2a2840a99f84fad5136127e0.r2.dev"
         }/${key}`,
         key: key,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (error) {
-    console.error("Function Error:", error.message);
+    console.error("Upload Error:", error.message);
     return new Response(
-      JSON.stringify({ error: `[V3_ERROR] ${error.message}` }),
+      JSON.stringify({ error: `[V3_CATCH] ${error.message}` }),
       {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

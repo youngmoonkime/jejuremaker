@@ -113,6 +113,34 @@ const Discovery: React.FC<DiscoveryProps> = ({
     return MATERIAL_ICONS[material] || MATERIAL_ICONS['default'];
   };
 
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [startX, setStartX] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!scrollRef.current) return;
+    setIsDragging(true);
+    setStartX(e.pageX - scrollRef.current.offsetLeft);
+    setScrollLeft(scrollRef.current.scrollLeft);
+  };
+
+  const handleMouseLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !scrollRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - scrollRef.current.offsetLeft;
+    const walk = (x - startX) * 2; // Scroll speed multiplier
+    scrollRef.current.scrollLeft = scrollLeft - walk;
+  };
+
   return (
     <>
       {/* Trending Slider */}
@@ -131,11 +159,19 @@ const Discovery: React.FC<DiscoveryProps> = ({
 
       {/* Filters - Dynamic Material Categories */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4 px-4 sm:px-0">
-        <div className="flex gap-2 overflow-x-auto pb-2 w-full sm:w-auto scrollbar-hide mask-fade-right">
+        <div 
+          ref={scrollRef}
+          onMouseDown={handleMouseDown}
+          onMouseLeave={handleMouseLeave}
+          onMouseUp={handleMouseUp}
+          onMouseMove={handleMouseMove}
+          className={`flex gap-2 overflow-x-auto pb-2 w-full sm:w-auto scrollbar-hide select-none transition-all ${isDragging ? 'cursor-grabbing scale-[0.99]' : 'cursor-grab'}`}
+          style={{ scrollBehavior: isDragging ? 'auto' : 'smooth' }}
+        >
           {/* All Projects Button */}
           <button
-            onClick={() => setSelectedCategory('all')}
-            className={`px-6 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 ${selectedCategory === 'all'
+            onClick={() => !isDragging && setSelectedCategory('all')}
+            className={`px-6 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 pointer-events-auto ${selectedCategory === 'all'
               ? 'bg-gray-900 dark:bg-white dark:text-gray-900 text-white shadow-md'
               : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
               }`}
@@ -148,8 +184,8 @@ const Discovery: React.FC<DiscoveryProps> = ({
           {materialCategories.map((material) => (
             <button
               key={material}
-              onClick={() => setSelectedCategory(material)}
-              className={`px-6 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 ${selectedCategory === material
+              onClick={() => !isDragging && setSelectedCategory(material)}
+              className={`px-6 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 pointer-events-auto ${selectedCategory === material
                 ? 'bg-gray-900 dark:bg-white dark:text-gray-900 text-white shadow-md'
                 : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
@@ -227,10 +263,13 @@ const Discovery: React.FC<DiscoveryProps> = ({
                     <span className="material-icons-round text-sm text-gray-400">visibility</span> {(project.views || 0).toLocaleString()}
                   </div>
                 )}
-                {(project.likes || 0) > 0 && (
-                  <div className={`flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded ${likedProjects.has(project.id) ? 'text-red-500' : ''}`}>
-                    <span className={`material-icons-round text-sm ${likedProjects.has(project.id) ? 'text-red-500' : 'text-gray-400'}`}>favorite</span> {(project.likes || 0).toLocaleString()}
-                  </div>
+                {project.likes > 0 && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onLikeToggle(project.id); }}
+                    className={`flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors ${likedProjects.has(project.id) ? 'text-red-500' : ''}`}
+                  >
+                    <span className={`material-icons-round text-sm ${likedProjects.has(project.id) ? 'text-red-500' : 'text-gray-400'}`}>favorite</span> {project.likes.toLocaleString()}
+                  </button>
                 )}
               </div>
             </div>
