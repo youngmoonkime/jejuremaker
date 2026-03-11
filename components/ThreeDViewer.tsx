@@ -148,13 +148,10 @@ const ThreeDViewer = forwardRef<ThreeDViewerHandle, ThreeDViewerProps>(({ modelU
         console.log("ThreeDViewer: Loading model from:", modelUrl);
 
         const isR2 = modelUrl.includes('r2.dev') || modelUrl.includes('cloudflare');
-        const needsProxy = (modelUrl.includes('tripo') || modelUrl.includes('amazonaws')) && !modelUrl.includes('tripo-proxy');
+        const isTripo = modelUrl.includes('tripo') || modelUrl.includes('amazonaws');
+        const needsProxy = (isR2 || isTripo) && !modelUrl.includes('tripo-proxy');
         
-        if (isR2) {
-            // Direct load from R2 to save Supabase Egress
-            loadUrl = modelUrl;
-            console.log("ThreeDViewer: Direct R2 Load (Saving Egress):", loadUrl);
-        } else if (needsProxy) {
+        if (needsProxy) {
             loadUrl = `${config.supabase.url}/functions/v1/tripo-file-proxy?url=${encodeURIComponent(modelUrl)}`;
             console.log("ThreeDViewer: Using Proxy URL:", loadUrl);
         }

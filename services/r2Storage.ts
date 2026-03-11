@@ -16,12 +16,26 @@ export const uploadToR2 = async (
     if (file instanceof File) {
         fileName = file.name.replace(/\s+/g, "_");
     } else {
-        const ext = file.type === "image/webp"
+        const type = file.type;
+        const ext = type.includes("webp")
             ? "webp"
-            : file.type === "model/gltf-binary"
+            : type.includes("png")
+            ? "png"
+            : type.includes("jpeg") || type.includes("jpg")
+            ? "jpg"
+            : type.includes("gif")
+            ? "gif"
+            : type.includes("svg")
+            ? "svg"
+            : type.includes("gltf-binary") ||
+                    type.includes("octet-stream") && folder === "models"
             ? "glb"
+            : type.includes("stl")
+            ? "stl"
+            : type.includes("obj")
+            ? "obj"
             : "bin";
-        fileName = `generated.${ext}`;
+        fileName = `${Date.now()}_generated.${ext}`;
     }
 
     // 1. Prepare FormData for proxy upload
@@ -66,6 +80,46 @@ export const uploadToR2 = async (
     }
 
     return data.publicUrl;
+};
 
-    return data.publicUrl;
+export const deleteFromR2 = async (keys: string[]): Promise<boolean> => {
+    if (!keys || keys.length === 0) return true;
+
+    try {
+        const response = await fetch(
+            `${config.supabase.url}/functions/v1/upload-r2`,
+            {
+                method: "DELETE",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${config.supabase.anonKey}`,
+                },
+                body: JSON.stringify({ keys }),
+            },
+        );
+
+        if (!response.ok) {
+            const err = await response.json();
+            console.error("[deleteFromR2] Error:", err);
+            return false;
+        }
+
+        const data = await response.json();
+        console.log(`[deleteFromR2] Successfully deleted ${data.count} assets`);
+        return true;
+    } catch (error) {
+        console.error("[deleteFromR2] Failed:", error);
+        return false;
+    }
+};
+
+export const getR2KeyFromUrl = (url: string): string | null => {
+    if (!url || !url.includes("r2.dev") && !url.includes("cloudflarestorage.com")) return null;
+    try {
+        const urlObj = new URL(url);
+        // Path starts with /, so remove it (e.g., /models/123.glb -> models/123.glb)
+        return urlObj.pathname.substring(1);
+    } catch (e) {
+        return null;
+    }
 };

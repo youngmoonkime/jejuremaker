@@ -2,7 +2,7 @@ import React from 'react';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import { User } from '@supabase/supabase-js';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 import { Maker, Project } from '../types';
 import WizardModal from './WizardModal';
 import { config } from '../services/config';
@@ -17,7 +17,7 @@ interface LayoutProps {
     isDarkMode: boolean;
     toggleDarkMode: () => void;
     onLoginClick: (target?: any) => void;
-    onNavigate: (view: any) => void;
+    onNavigate: (view: any, targetId?: string | null) => void;
     onLogout: () => void;
     makers: Maker[];
     onAnalyzeClick: () => void;
@@ -25,6 +25,7 @@ interface LayoutProps {
     showWizard: boolean;
     setShowWizard: (show: boolean) => void;
     projects: Project[];
+    myProjects: Project[];
     // Wizard props
     setUserTokens: (tokens: number) => void;
     onAddProject: (project: Project) => void;
@@ -34,6 +35,15 @@ interface LayoutProps {
     notifications?: any[];
     onNotificationClick?: (projectId: string, notifId: string) => void;
     onDeleteNotification?: (notifId: string) => void;
+    challengeStats: { 
+        global_public_co2: number; 
+        global_public_waste: number;
+        user_private_co2: number;
+        user_private_waste: number;
+        global_public_count: number;
+        user_private_count: number;
+    } | null;
+    isSuperAdmin: boolean;
 }
 
 const Layout: React.FC<LayoutProps> = ({
@@ -54,14 +64,17 @@ const Layout: React.FC<LayoutProps> = ({
     showWizard,
     setShowWizard,
     projects,
+    myProjects,
     setUserTokens,
     onAddProject,
     currentView,
     onSearch,
     onCancel,
-    notifications,
+    notifications = [],
     onNotificationClick,
-    onDeleteNotification
+    onDeleteNotification,
+    challengeStats,
+    isSuperAdmin
 }) => {
     return (
         <div className={`min-h-screen text-gray-800 dark:text-gray-100 bg-background-light dark:bg-background-dark transition-colors duration-300`}>
@@ -86,7 +99,7 @@ const Layout: React.FC<LayoutProps> = ({
                 />
             )}
 
-            <div className={(currentView === 'upload' || currentView === 'lab' || currentView === 'workspace') ? 'w-full h-screen' : "max-w-[1600px] mx-auto pt-20 lg:pt-24 pb-24 lg:pb-12 px-4 lg:px-6 flex flex-col lg:flex-row lg:gap-10"}>
+            <div className={(currentView === 'upload' || currentView === 'lab' || currentView === 'workspace') ? 'w-full min-h-screen flex flex-col' : "max-w-[1600px] mx-auto pt-20 lg:pt-24 pb-24 lg:pb-12 px-4 lg:px-6 flex flex-col lg:flex-row lg:gap-10"}>
                 {(currentView !== 'upload' && currentView !== 'lab') && (
                     <>
                         {/* Desktop Sidebar */}
@@ -98,6 +111,12 @@ const Layout: React.FC<LayoutProps> = ({
                             sendMessageToMaker={sendMessageToMaker}
                             currentView={currentView}
                             currentUserId={user?.id}
+                            projects={projects}
+                            myProjects={myProjects}
+                            challengeStats={challengeStats}
+                            isSuperAdmin={isSuperAdmin}
+                            userTokens={userTokens}
+                            setUserTokens={setUserTokens}
                         />
 
                         {/* Mobile Bottom Navigation */}

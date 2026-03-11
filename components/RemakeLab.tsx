@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 
 interface RemakeLabProps {
     language: Language;
@@ -35,45 +35,45 @@ const RemakeLab: React.FC<RemakeLabProps> = ({
         };
     }, []);
 
-    // Hero slides data
+    // Hero slides data - Focused on the 3 core tools
     const heroSlides = [
         {
             id: 1,
-            title: '이미지를 3D 모델로 변환',
-            titleEn: 'Convert Images to 3D Models',
-            subtitle: 'AI 기반 3D 모델 생성 기술',
-            subtitleEn: 'AI-based 3D Model Generation Tech',
-            description: 'Hunyuan 3.0, Hitem3D 1.5, Tripo 1.0으로 더욱 정교하고 생생한 디테일을 생성합니다.',
-            descriptionEn: 'Generate precise and vivid details with Hunyuan 3.0, Hitem3D 1.5, and Tripo 1.0. Experience the next level of creation today.',
-            cta: '바로 체험하기',
-            ctaEn: 'Try It Now',
-            image: 'https://images.unsplash.com/photo-1633356122544-f134324a6cee?auto=format&fit=crop&w=1200&q=80',
+            title: '현무암 패턴 생성기',
+            titleEn: 'Basalt Pattern Generator',
+            subtitle: '제주 자연의 질감을 디지털로',
+            subtitleEn: 'Digitalizing Jeju Nature Texture',
+            description: '제주 현무암 특유의 다공질 패턴을 AI 알고리즘으로 생성하고 3D 모델에 정교하게 적용합니다.',
+            descriptionEn: 'Generate unique Jeju basalt pore patterns using AI algorithms and precisely apply them to 3D models.',
+            cta: '패턴 생성하기',
+            ctaEn: 'Generate Pattern',
+            image: '/images/basalt_pattern.png',
             isNew: true
         },
         {
             id: 2,
-            title: '라이트박스 제작기',
-            titleEn: 'Lightbox Maker',
-            subtitle: '레이저 커팅에 최적화',
-            subtitleEn: 'Optimized for laser cutting',
-            description: '이미지, 텍스트를 입력으로 멋진 라이트박스를 만드세요.',
-            descriptionEn: 'Create beautiful lightboxes from images and text.',
-            cta: '시작하기',
-            ctaEn: 'Get Started',
-            image: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1200&q=80',
-            isNew: false
+            title: '골판지 뮤지션',
+            titleEn: 'Cardboard Musician',
+            subtitle: '폐자재에 리듬을 입히다',
+            subtitleEn: 'Giving Rhythm to Waste',
+            description: '버려지는 골판지를 활용한 악기와 뮤지션 캐릭터를 디자인하여 업사이클링의 즐거움을 더합니다.',
+            descriptionEn: 'Design musical instruments and characters using discarded cardboard, adding joy to upcycling.',
+            cta: '연주 시작하기',
+            ctaEn: 'Start Playing',
+            image: '/images/cardboard_musician.png',
+            isNew: true
         },
         {
             id: 3,
-            title: '제주 폐자재 3D 스캔',
-            titleEn: 'Jeju Waste Material 3D Scan',
-            subtitle: '현무암, 해양 폐기물을 디지털화',
-            subtitleEn: 'Digitize basalt and marine waste',
-            description: '제주도의 다양한 폐자재를 3D 스캔하여 리메이크 프로젝트에 활용하세요.',
-            descriptionEn: 'Scan various Jeju waste materials in 3D for remake projects.',
-            cta: '스캔하기',
-            ctaEn: 'Start Scanning',
-            image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=1200&q=80',
+            title: '도면 만들기',
+            titleEn: 'Blueprint Creator',
+            subtitle: '아이디어를 설계도로',
+            subtitleEn: 'Ideas into Blueprints',
+            description: 'AI의 도움을 받아 복잡한 3D 모델을 실제 제작 가능한 정밀한 2D 도면으로 변환합니다.',
+            descriptionEn: 'Convert complex 3D models into precise 2D blueprints for real-world fabrication with AI assistance.',
+            cta: '도면 생성하기',
+            ctaEn: 'Create Blueprint',
+            image: '/images/blueprint_creator.png',
             isNew: true
         }
     ];
@@ -88,80 +88,37 @@ const RemakeLab: React.FC<RemakeLabProps> = ({
         { id: 'experimental', label: '실험', labelEn: 'Experimental' }
     ];
 
-    // Lab tools data
+    // Lab tools data - Consolidated to 3 tools
     const labTools: LabTool[] = [
-        {
-            id: 'ai-waste-analysis',
-            title: 'AI 폐자재 분석',
-            titleEn: 'AI Waste Analysis',
-            description: '폐자재 사진을 업로드하면 소재를 분석하고 업사이클링 아이디어를 제안합니다.',
-            descriptionEn: 'Analyze waste photos to identify materials and suggest upcycling ideas.',
-            image: 'https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?auto=format&fit=crop&w=400&q=80',
-            category: ['ai', 'experimental'],
-            isNew: true
-        },
-        {
-            id: 'image-to-3d',
-            title: '이미지를 3D 모델로',
-            titleEn: 'Image to 3D Model',
-            description: '스케치나 사진을 3D 프린팅 가능한 모델로 즉시 변환합니다.',
-            descriptionEn: 'Instantly convert sketches or photos into 3D printable models.',
-            image: 'https://images.unsplash.com/photo-1633356122544-f134324a6cee?auto=format&fit=crop&w=400&q=80',
-            category: ['ai']
-        },
         {
             id: 'basalt-pattern',
             title: '현무암 패턴 생성기',
             titleEn: 'Basalt Pattern Gen',
-            description: '제주 현무암의 독특한 기공 패턴을 3D 모델에 적용합니다.',
-            descriptionEn: 'Apply unique Jeju basalt pore patterns to 3D models.',
-            image: 'https://images.unsplash.com/photo-1596131460596-6e2ee79e2c2e?auto=format&fit=crop&w=400&q=80',
-            category: ['experimental', 'single-color']
+            description: '제주 현무암의 독특한 기공 패턴을 AI로 생성하여 3D 모델에 적용합니다.',
+            descriptionEn: 'Generate unique Jeju basalt pore patterns using AI and apply them to 3D models.',
+            image: '/images/basalt_pattern.png',
+            category: ['ai', 'experimental'],
+            isNew: true
         },
         {
-            id: 'sea-glass-art',
-            title: '바다 유리 공예',
-            titleEn: 'Sea Glass Art',
-            description: '마모된 유리 조각들을 조합하여 아름다운 조명과 장식품을 디자인합니다.',
-            descriptionEn: 'Design beautiful lights and ornaments using weathered sea glass pieces.',
-            image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=400&q=80',
-            category: ['multi-color', 'ai']
+            id: 'cardboard-musician',
+            title: '골판지 뮤지션',
+            titleEn: 'Cardboard Musician',
+            description: '버려진 골판지를 활용하여 움직이는 인형이나 실제 연주 가능한 악기를 설계합니다.',
+            descriptionEn: 'Design kinetic dolls or playable instruments using recycled cardboard.',
+            image: '/images/cardboard_musician.png',
+            category: ['experimental', 'laser'],
+            isNew: true
         },
         {
-            id: 'souvenir-creator',
-            title: '제주 기념품 제작',
-            titleEn: 'Jeju Souvenir Creator',
-            description: '돌하르방, 한라산, 감귤 모티브의 커스텀 기념품을 3D로 디자인합니다.',
-            descriptionEn: 'Design custom 3D souvenirs with Harubang, Hallasan, and Mandarin motifs.',
-            image: 'https://images.unsplash.com/photo-1580556637482-1df697274db2?auto=format&fit=crop&w=400&q=80',
-            category: ['single-color', 'laser']
-        },
-        {
-            id: 'upcycle-furniture',
-            title: '업사이클 가구 디자인',
-            titleEn: 'Upcycle Furniture',
-            description: '폐목재와 플라스틱을 결합한 실용적인 가구를 설계합니다.',
-            descriptionEn: 'Design practical furniture combining waste wood and recycled plastic.',
-            image: 'https://images.unsplash.com/photo-1538688525198-9b88f6f53126?auto=format&fit=crop&w=400&q=80',
-            category: ['laser', 'experimental']
-        },
-        {
-            id: 'marine-debris-art',
-            title: '해양 쓰레기 아트',
-            titleEn: 'Marine Debris Art',
-            description: '해양 플라스틱의 색감과 형태를 살린 예술 작품을 구상합니다.',
-            descriptionEn: 'Create art pieces utilizing the colors and shapes of marine plastic.',
-            image: 'https://images.unsplash.com/photo-1621451537084-482c73073a0f?auto=format&fit=crop&w=400&q=80',
-            category: ['multi-color', 'experimental']
-        },
-        {
-            id: 'net-remake',
-            title: '폐그물 리메이크',
-            titleEn: 'Fishing Net Remake',
-            description: '버려진 그물을 활용한 가방, 인테리어 소품을 디자인합니다.',
-            descriptionEn: 'Design bags and interior props using discarded fishing nets.',
-            image: 'https://images.unsplash.com/photo-1520113412141-860c23984d68?auto=format&fit=crop&w=400&q=80',
-            category: ['experimental']
+            id: 'blueprint-creator',
+            title: '도면 만들기',
+            titleEn: 'Blueprint Creator',
+            description: '3D 모델링 데이터를 바탕으로 레이저 커팅이나 CNC 가공을 위한 정교한 2D 도면을 생성합니다.',
+            descriptionEn: 'Create precise 2D blueprints for laser cutting or CNC machining from 3D data.',
+            image: '/images/blueprint_creator.png',
+            category: ['laser', 'ai'],
+            isNew: true
         }
     ];
 
@@ -200,7 +157,7 @@ const RemakeLab: React.FC<RemakeLabProps> = ({
                         <div className="absolute inset-0 z-0 bg-gradient-to-r from-[#0F172A] via-[#0F172A]/80 to-transparent"></div>
 
                         {/* Content */}
-                        <div className="relative z-10 container mx-auto px-6 grid grid-cols-12 h-full items-center">
+                        <div className="relative z-10 px-8 md:px-12 grid grid-cols-12 h-full items-center">
                             <div className="col-span-12 lg:col-span-7 py-12">
                                 {slide.isNew && (
                                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#4ADE80]/20 text-[#4ADE80] border border-[#4ADE80]/30 text-xs font-bold mb-6">
@@ -242,7 +199,7 @@ const RemakeLab: React.FC<RemakeLabProps> = ({
             </section>
 
             {/* Modeling Tools Section */}
-            <section className="py-16 px-6 container mx-auto">
+            <section className="py-16 px-8 md:px-12">
                 <div className="text-center mb-10">
                     <h2 className="text-3xl font-bold mb-3 dark:text-white">
                         {language === 'ko' ? '모델링 도구' : 'Modeling Tools'}
@@ -272,12 +229,12 @@ const RemakeLab: React.FC<RemakeLabProps> = ({
                     </div>
                 </div>
 
-                {/* Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {/* Grid - Centered */}
+                <div className="flex flex-wrap justify-center gap-8 max-w-7xl mx-auto">
                     {filteredTools.map(tool => (
                         <div
                             key={tool.id}
-                            className="group bg-white dark:bg-[#1E293B] border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden hover:shadow-xl dark:hover:shadow-black/40 transition-all duration-300 flex flex-col h-full relative"
+                            className="group bg-white dark:bg-[#1E293B] border border-gray-100 dark:border-gray-800 rounded-3xl overflow-hidden hover:shadow-2xl dark:hover:shadow-black/60 transition-all duration-500 flex flex-col w-full md:w-[calc(50%-1rem)] lg:w-[calc(33.333%-2rem)] min-w-[300px] max-w-[400px] relative"
                         >
                             {tool.isNew && (
                                 <div className="absolute top-3 left-3 z-10 bg-[#4ADE80] text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">
@@ -323,7 +280,7 @@ const RemakeLab: React.FC<RemakeLabProps> = ({
 
             {/* Footer - Added from user request */}
             <footer className="bg-gray-50 dark:bg-[#0B1120] border-t border-gray-200 dark:border-gray-800 py-12 mt-12 transition-colors duration-300">
-                <div className="container mx-auto px-6 text-center text-gray-500 dark:text-gray-400 text-sm">
+                <div className="px-8 md:px-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                     <p>© 2026 Jeju Remake Lab. All rights reserved.</p>
                     <div className="mt-4 space-x-4">
                         <a className="hover:text-[#4ADE80] transition cursor-pointer">Privacy Policy</a>

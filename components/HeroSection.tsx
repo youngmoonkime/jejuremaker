@@ -116,7 +116,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
 
                                 <div className="flex flex-row flex-wrap items-center gap-3 md:gap-4">
                                     <button
-                                        onClick={handleAnalyzeClick}
+                                        onClick={() => alert("해당 기능은 추후 링크로 연동될 예정입니다.")}
                                         className="flex-1 sm:flex-none px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white text-sm md:text-base rounded-2xl font-bold shadow-xl shadow-primary/20 transition-all hover:scale-110 active:scale-95 whitespace-nowrap"
                                     >
                                         {t.hero?.participate || "참여하기"}

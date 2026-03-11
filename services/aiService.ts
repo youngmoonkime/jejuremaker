@@ -7,55 +7,84 @@ const GEMINI_PROXY_URL = `${config.supabase.url}/functions/v1/gemini-proxy`;
 const TRIPO_PROXY_URL = `${config.supabase.url}/functions/v1/tripo-file-proxy`;
 // Helper to ensure we have Base64 data (handles URLs)
 async function ensureBase64(input: string): Promise<string> {
+    if (!input) return "";
+
     if (input.startsWith("http")) {
-        try {
-            console.log("Fetching image from URL for Gemini:", input);
-            const response = await fetch(input);
-            const blob = await response.blob();
-            const buffer = await blob.arrayBuffer();
-            const base64 = btoa(
-                new Uint8Array(buffer).reduce(
-                    (data, byte) => data + String.fromCharCode(byte),
-                    "",
-                ),
+        const cleanUrl = input.split("?")[0].toLowerCase();
+        const ext = cleanUrl.split(".").pop() || "";
+
+        // Check if it's a known bin/model that is NOT in the ai-generated (image) folder
+        const nonImageExtensions = ["glb", "stl", "gltf", "zip", "obj"];
+        const isBinary = nonImageExtensions.includes(ext);
+        const isBinNotImage = ext === "bin" &&
+            !cleanUrl.includes("/ai-generated/");
+
+        if (isBinary || isBinNotImage) {
+            console.warn(`[ensureBase64] Skipping non-image file: ${input}`);
+            throw new Error(
+                `Cannot process non-image file as Multimodal input: ${ext}`,
             );
-            return base64;
-        } catch (e) {
-            console.warn("Direct fetch failed, trying proxy...", e);
-            try {
-                // Fallback to Proxy
-                const proxyUrl =
-                    `${config.supabase.url}/functions/v1/tripo-file-proxy?url=${
-                        encodeURIComponent(input)
-                    }`;
-                const response = await fetch(proxyUrl, {
-                    headers: {
-                        "Authorization": `Bearer ${config.supabase.anonKey}`,
-                    },
-                });
-                if (!response.ok) {
-                    throw new Error(`Proxy error: ${response.statusText}`);
-                }
-                const blob = await response.blob();
-                const buffer = await blob.arrayBuffer();
-                const base64 = btoa(
-                    new Uint8Array(buffer).reduce(
-                        (data, byte) => data + String.fromCharCode(byte),
-                        "",
-                    ),
-                );
-                return base64;
-            } catch (proxyError) {
-                console.error(
-                    "Failed to fetch image for Gemini (via proxy):",
-                    proxyError,
-                );
-                throw new Error(`Failed to fetch image from URL: ${e}`);
-            }
         }
+
+        const isR2 = input.includes("r2.dev") || input.includes("cloudflare");
+        const isTripo = input.includes("tripo") || input.includes("amazonaws");
+        const shouldDirectFetch = !isR2 && !isTripo &&
+            !window.location.hostname.includes("localhost");
+
+        let blob: Blob;
+
+        if (shouldDirectFetch) {
+            try {
+                console.log("[ensureBase64] Fetching (Direct):", input);
+                const response = await fetch(input);
+                if (!response.ok) throw new Error(`Status: ${response.status}`);
+                blob = await response.blob();
+            } catch (e) {
+                console.warn(
+                    "[ensureBase64] Direct fetch failed, trying proxy...",
+                    e,
+                );
+                blob = await fetchViaProxy(input);
+            }
+        } else {
+            console.log("[ensureBase64] Fetching (Proxy Proactive):", input);
+            blob = await fetchViaProxy(input);
+        }
+
+        return await blobToBase64(blob);
     }
     // Assume it's already base64 (with or without data prefix)
     return input.split(",")[1] || input;
+}
+
+// Helper: Fetch via Proxy
+async function fetchViaProxy(url: string): Promise<Blob> {
+    const proxyUrl =
+        `${config.supabase.url}/functions/v1/tripo-file-proxy?url=${
+            encodeURIComponent(url)
+        }`;
+    const response = await fetch(proxyUrl, {
+        headers: { "Authorization": `Bearer ${config.supabase.anonKey}` },
+    });
+    if (!response.ok) throw new Error(`Proxy failed: ${response.status}`);
+    return await response.blob();
+}
+
+// Helper: Robust Blob to Base64 (Chunked to avoid stack limits)
+async function blobToBase64(blob: Blob): Promise<string> {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const len = bytes.byteLength;
+    const chunk_size = 8192; // Process in 8KB chunks
+
+    for (let i = 0; i < len; i += chunk_size) {
+        binary += String.fromCharCode.apply(
+            null,
+            Array.from(bytes.subarray(i, Math.min(i + chunk_size, len))) as any,
+        );
+    }
+    return btoa(binary);
 }
 
 // Helper for Gemini Multimodal Calls (via Edge Function Proxy)
@@ -68,13 +97,23 @@ async function callGemini(
     const contentParts: any[] = [{ text: prompt }];
 
     if (imageBase64) {
-        const cleanBase64 = await ensureBase64(imageBase64);
-        contentParts.push({
-            inline_data: {
-                mime_type: "image/jpeg",
-                data: cleanBase64,
-            },
-        });
+        try {
+            const cleanBase64 = await ensureBase64(imageBase64);
+            if (cleanBase64) {
+                contentParts.push({
+                    inline_data: {
+                        mime_type: "image/jpeg",
+                        data: cleanBase64,
+                    },
+                });
+            }
+        } catch (err) {
+            console.error(
+                "[callGemini] Multimodal input skipped due to error:",
+                err,
+            );
+            // We continue without the image if analysis/guide generation can still work
+        }
     }
 
     const payload = {
@@ -814,10 +853,11 @@ export const generateBlueprintImage = async (
             specificInstruction = `
             Type: Production Drawing (제작 도면).
             Layout: Orthographic Projection (Front, Side, Plan views).
+            ENVIRONMENT: STRICTLY PURE WHITE BACKGROUND (#FFFFFF). NO EASEL, NO ROOM, NO SHADOWS, NO PHOTO ELEMENTS.
             CRITICAL DIMENSIONS: You MUST explicitly write the total dimensions [${
                 guideDimensions?.target_dimensions || promptContext
             }] next to the dimension lines.
-            Instruction: Draw the EXACT same silhouette and line thickness as the attached prompt image.
+            Instruction: Draw a technical black line-art drawing of the product. SILHOUETTE MUST BE IDENTICAL to the attached image but converted into flat 2D lines. No realistic textures.
             Additional: Include a BOM (Bill of Materials) table in the bottom right corner with columns: Part No | Part Name | Material | Fabrication Method | Qty.
             - Recycled material body parts → Fabrication Method: "가공/성형 (Hand/CNC)"
             - Any connector or joint part that cannot be snap-fit → Fabrication Method: "3D Print (PLA)" with print settings noted.
@@ -828,8 +868,10 @@ export const generateBlueprintImage = async (
         case "detailed":
             specificInstruction = `
             Type: Detailed Product Drawing (제품 상세도).
-            Layout: Exploded View (부품 분해도).
-            HARD CONSTRAINTS from Fabrication Guide (YOU MUST FOLLOW THESE EXACTLY):
+            Layout: Technical Exploded View (부품 분해도).
+            ENVIRONMENT: STRICTLY PURE WHITE BACKGROUND (#FFFFFF). NO EASEL, NO ROOM, NO PROPS, NO BACKGROUND AT ALL.
+            Instruction: DO NOT return the original photo. You MUST decompose the product into individual parts and show them floating apart (exploded). This must be a clean, black-and-white line-art technical drawing. No realistic textures or 3D shading.
+            HARD CONSTRAINTS from Fabrication Guide:
             - Total Product Dimensions: ${
                 guideDimensions?.target_dimensions || "See context"
             }
@@ -840,8 +882,7 @@ export const generateBlueprintImage = async (
             - Material Thickness: ${
                 guideDimensions?.material_thickness_mm || "As specified"
             }
-            Instruction: Draw the SAME product from the attached image, but with all components floating apart in an exploded view. Each part MUST be labeled with a leader line and number. Show arrows indicating how pieces snap/interlock together using the assembly method specified above. The overall silhouette when assembled must match the production drawing.
-            Additional: Include a detailed Parts List table matching the BOM.
+            Additional: Include a detailed Parts List table matching the BOM in the bottom right corner. Each part label must have a clear leader line.
             `;
             break;
         case "mechanical":
@@ -895,11 +936,14 @@ export const generateBlueprintImage = async (
 
     # ASSIGNMENT: ${specificInstruction}
     
-    Style Guidelines:
-    - Black lines on pure white background. NO gray shading, NO colors.
-    - Standard Engineering Font (e.g., Arial Narrow or ISO font).
-    - Monochrome high-contrast technical line art.
-    - Professional Border frame with Title Block.
+    styleGuidelines:
+    - BACKGROUND: PURE SOLID WHITE (#FFFFFF) ONLY. ABSOLUTELY NO BACKGROUND CONTENT.
+    - NO EASEL, NO ROOM, NO SHADOWS, NO 3D ENVIRONMENT, NO PHOTOREALISTIC PROPS.
+    - DO NOT COPY THE BACKGROUND OF THE ATTACHED IMAGE. ONLY COPY THE OBJECT SILHOUETTE.
+    - This is a flat 2D technical document, NOT an artistic photograph.
+    - Monochrome high-contrast black lines on white paper.
+    - Professional Engineering Border and Title Block included.
+    - Standard Engineering Font for all text.
     `;
 
     // Use the reference blueprint as anchor image if provided, otherwise use concept image
@@ -935,6 +979,7 @@ export const analyzeCopilotIntent = async (
     taggedNodeId?: string | null,
     userNickname: string = "User",
     attachedImageBase64?: string | null,
+    hasDetailedAccess: boolean = false, // Security Gate
 ): Promise<CopilotResponse> => {
     // Keep context concise: Only send ID and brief content to avoid payload bloat
     const contextNodesString = recentNodes.length > 0
@@ -944,6 +989,11 @@ export const analyzeCopilotIntent = async (
             }`
         ).join("\n")
         : "No existing nodes.";
+
+    // --- SECURITY GATE: Conditionally provide sensitive project data ---
+    const guideContext = hasDetailedAccess 
+        ? (projectContext?.fabricationGuide || projectContext?.metadata?.fabrication_guide || "None")
+        : "PRIVATE (Access Restricted: Do NOT reveal or summarize the original fabrication steps. This is a security policy. Only answer based on user requests and publicly visible info.)";
 
     const prompt = `
     You are an AI Copilot for a 3D Upcycling design tool.
@@ -955,7 +1005,7 @@ export const analyzeCopilotIntent = async (
     Base Recipe/Description: ${
         projectContext?.description || projectContext || "None"
     }
-    Fabrication Guide: ${projectContext?.fabricationGuide || "None"}
+    Fabrication Guide: ${guideContext}
     Primary Reference Image: ${projectContext?.images?.[0] || "None available"}
     -----------------------
 
@@ -971,6 +1021,12 @@ export const analyzeCopilotIntent = async (
     3. GENERATE: Generate a new 3D model (e.g. "렌더링해줘", "이걸로 3D 모델 만들어줘").
     4. VIEW_CONTROL: Control the 3D viewer (e.g. "회전해봐", "와이어프레임 보여줘").
     5. GENERAL_CHAT: Just asking a question or general discussion.
+
+    --- SECURITY POLICY ---
+    - If 'Fabrication Guide' is marked as 'PRIVATE', you MUST NOT reveal, summarize, or describe any of the original fabrication steps. This is a hard security requirement.
+    - If the user asks for the construction method, techniques, or specific steps of the original project while it is marked 'PRIVATE', politely inform them that this information is restricted to the project owner and super admins for quality control.
+    - Suggest they request access from the maker or use the AI to generate their own unique remix based on a different concept.
+    -----------------------
 
     Logic Flow (targetNodeId):
     Look at the "Recent Nodes". 

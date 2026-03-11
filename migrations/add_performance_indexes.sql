@@ -1,19 +1,7 @@
--- ==============================================
--- JejuRemaker: Performance Index Migration
--- Run this in Supabase SQL Editor
--- ==============================================
+-- 1. 상위 정렬을 위한 인덱스 추가 (조회수 및 좋아요)
+CREATE INDEX IF NOT EXISTS idx_items_likes ON items(likes DESC);
+CREATE INDEX IF NOT EXISTS idx_items_views ON items(views DESC);
 
--- 1. Index on owner_id (fixes fetchMyProjects timeout)
-CREATE INDEX IF NOT EXISTS idx_items_owner_id ON items (owner_id);
-
--- 2. Index on category (speeds up fetchProjects, Community feed)
-CREATE INDEX IF NOT EXISTS idx_items_category ON items (category);
-
--- 3. Index on is_public (speeds up public project filtering)
-CREATE INDEX IF NOT EXISTS idx_items_is_public ON items (is_public);
-
--- 4. Composite index for common query pattern (owner + created_at sorting)
-CREATE INDEX IF NOT EXISTS idx_items_owner_created ON items (owner_id, created_at DESC);
-
--- 5. Index on user_profiles.user_id for JOIN performance
-CREATE INDEX IF NOT EXISTS idx_user_profiles_user_id ON user_profiles (user_id);
+-- 2. 복합 인덱스 (공개 여부와 함께 정렬 시 유리)
+CREATE INDEX IF NOT EXISTS idx_items_public_likes ON items(is_public, likes DESC) WHERE is_public = true;
+CREATE INDEX IF NOT EXISTS idx_items_public_views ON items(is_public, views DESC) WHERE is_public = true;

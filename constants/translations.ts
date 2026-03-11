@@ -8,10 +8,10 @@ export const TRANSLATIONS = {
         uploadPhoto:
             "사진을 업로드하면 AI가 업사이클링 프로젝트를 제안해드립니다.",
         analyzeNow: "지금 분석하기",
-        communityImpact: "커뮤니티 영향력",
-        carbonSaved: "탄소 절감",
+        communityImpact: "리메이크 챌린지",
+        carbonSaved: "탄소 절감 합계",
         projects: "프로젝트",
-        tonsWaste: "폐기물(톤)",
+        tonsWaste: "폐기물",
         discover: "탐색",
         trending: "인기 급상승",
         community: "커뮤니티",

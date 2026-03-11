@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { User } from '@supabase/supabase-js';
 import { TRANSLATIONS } from '../constants/translations';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 import { Project } from '../types';
 
 interface HeaderProps {
@@ -13,7 +13,7 @@ interface HeaderProps {
     isDarkMode: boolean;
     toggleDarkMode: () => void;
     onLoginClick: (target?: any) => void;
-    onNavigate: (view: any) => void;
+    onNavigate: (view: any, targetId?: string | null) => void;
     onLogout: () => void;
     onSearch?: (term: string) => void;
     currentView?: string; // Optional for backward compatibility, but recommended
@@ -48,7 +48,8 @@ const Header: React.FC<HeaderProps> = ({
     const [isSearchFocused, setIsSearchFocused] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
 
-    const hasUnread = notifications?.some(n => !n.read);
+    const unreadCount = notifications?.filter(n => !n.read).length || 0;
+    const hasUnread = unreadCount > 0;
 
     const handleSearch = (term: string) => {
         if (onSearch) {
@@ -243,8 +244,10 @@ const Header: React.FC<HeaderProps> = ({
                             className={`p-2 rounded-full transition-colors relative ${showNotifications ? 'bg-gray-200 dark:bg-gray-700 text-primary' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                         >
                             <span className="material-icons-round">notifications_none</span>
-                            {hasUnread && (
-                                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-white dark:border-[#121212]"></span>
+                            {unreadCount > 0 && (
+                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white border-2 border-white dark:border-[#121212] animate-in zoom-in-50 duration-300">
+                                    {unreadCount}
+                                </span>
                             )}
                         </button>
                         
@@ -265,10 +268,22 @@ const Header: React.FC<HeaderProps> = ({
                                                 className={`p-4 border-b border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-gray-50 dark:hover:bg-[#202224] transition-colors ${!notif.read ? 'bg-primary/5 dark:bg-primary/10' : ''}`}
                                             >
                                                 <div className="flex gap-3">
-                                                    <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0 border border-gray-200 dark:border-gray-700 bg-gray-100 mt-1">
+                                                    <div className={`w-10 h-10 rounded-full overflow-hidden flex-shrink-0 border border-gray-200 dark:border-gray-700 mt-1 relative flex items-center justify-center ${!notif.senderAvatar || !notif.senderAvatar.startsWith('http') ? 'bg-primary/20' : 'bg-gray-100'}`}>
                                                        {notif.senderAvatar && notif.senderAvatar.startsWith('http') ? (
-                                                          <img src={notif.senderAvatar} alt={notif.sender} className="w-full h-full object-cover" />
-                                                       ) : (
+                                                          <img 
+                                                            src={notif.senderAvatar} 
+                                                            alt={notif.sender} 
+                                                            className="w-full h-full object-cover" 
+                                                            onError={(e) => {
+                                                                (e.target as HTMLImageElement).style.display = 'none';
+                                                                (e.target as HTMLImageElement).parentElement?.classList.add('notif-avatar-fallback');
+                                                            }}
+                                                          />
+                                                       ) : null}
+                                                       <div className="absolute inset-0 items-center justify-center hidden [.notif-avatar-fallback_&]:flex bg-primary/20">
+                                                          <span className="text-primary font-bold">{notif.sender?.charAt(0) || 'U'}</span>
+                                                       </div>
+                                                       {!notif.senderAvatar && (
                                                           <div className="w-full h-full flex items-center justify-center bg-primary/20 text-primary font-bold">{notif.sender?.charAt(0) || 'U'}</div>
                                                        )}
                                                     </div>
@@ -277,7 +292,20 @@ const Header: React.FC<HeaderProps> = ({
                                                             <span className="font-bold">{notif.sender}</span> in <span className="font-bold text-primary truncate max-w-[120px] inline-block align-bottom">{notif.projectTitle}</span>
                                                         </p>
                                                         <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{notif.message}</p>
-                                                        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5 font-medium">{new Date(notif.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                                        <div className="flex items-center gap-3 mt-2">
+                                                            <p className="text-[10px] text-gray-400 dark:text-gray-500 font-medium">{new Date(notif.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                                            <button 
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setShowNotifications(false);
+                                                                    if (onNotificationClick) onNotificationClick(notif.projectId, notif.id);
+                                                                }}
+                                                                className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1"
+                                                            >
+                                                                <span className="material-icons-round text-xs">reply</span>
+                                                                {language === 'ko' ? '답장하기' : 'Reply'}
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                     <div className="flex flex-col items-center gap-2">
                                                         {!notif.read && <div className="w-2 h-2 rounded-full bg-primary mb-1"></div>}
@@ -299,8 +327,10 @@ const Header: React.FC<HeaderProps> = ({
                                         ))
                                     ) : (
                                         <div className="p-10 text-center flex flex-col items-center">
-                                            <span className="material-icons-round text-5xl text-gray-300 dark:text-gray-700 mb-3">notifications_off</span>
-                                            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">도착한 새로운 메시지가 없습니다.</p>
+                                            <span className="material-icons-round text-5xl text-gray-300 dark:text-gray-700 mb-3">notifications_none</span>
+                                            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                                {user ? '새로운 메시지가 없습니다.' : '로그인 후 메시지를 확인하세요.'}
+                                            </p>
                                         </div>
                                     )}
                                 </div>
@@ -322,12 +352,26 @@ const Header: React.FC<HeaderProps> = ({
                         <div className="relative">
                             <div
                                 onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                                className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group flex items-center justify-center"
+                                className={`w-9 h-9 rounded-full overflow-hidden border-2 border-white dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group flex items-center justify-center ${!headerAvatarUrl ? 'bg-gradient-to-tr from-blue-400 to-purple-400' : ''}`}
                                 title={t.logout}
                             >
                                 {headerAvatarUrl ? (
-                                    <img src={headerAvatarUrl} alt="User" className="w-full h-full object-cover" />
-                                ) : (
+                                    <img 
+                                        src={headerAvatarUrl} 
+                                        alt="User" 
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                            (e.target as HTMLImageElement).parentElement?.classList.add('header-avatar-fallback');
+                                        }}
+                                    />
+                                ) : null}
+                                <div className="absolute inset-0 items-center justify-center hidden [.header-avatar-fallback_&]:flex">
+                                    <span className="text-white font-bold text-sm">
+                                        {headerDisplayName.charAt(0).toUpperCase()}
+                                    </span>
+                                </div>
+                                {!headerAvatarUrl && (
                                     <span className="text-white font-bold text-sm">
                                         {headerDisplayName.charAt(0).toUpperCase()}
                                     </span>

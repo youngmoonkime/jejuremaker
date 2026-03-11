@@ -24,11 +24,9 @@ import {
 } from 'lucide-react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Project } from '../types';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 
 // --- Cloudflare R2 Configuration ---
-// 주의: 실제 프로덕션 환경에서는 이 키들을 환경변수(.env)로 관리하거나 
-// 서버(Supabase Edge Function)에서 서명된 URL을 생성하여 사용하는 것이 보안상 안전합니다.
 import { config } from '../services/config';
 import { uploadToR2, isR2Configured as checkR2Config } from '../services/r2Storage';
 import { verifyEcoScore } from '../services/aiService';
@@ -43,7 +41,7 @@ interface AdminUploadProps {
   language: Language;
   user: any;
   onSelectProject: (project: Project) => void;
-  initialProject?: Project | null; // Add optional initialProject for edit mode
+  initialProject?: Project | null;
 }
 
 const MATERIAL_OPTIONS = [
@@ -56,15 +54,10 @@ const MATERIAL_OPTIONS = [
   { label: '폐HDPE (병뚜껑 등)', value: 'Waste Plastic (HDPE)', unit: 'g' }
 ];
 
-// Match a free-text material name from AI/DB to a MATERIAL_OPTIONS dropdown value
 const resolveMaterialValue = (rawMaterial: string): string => {
   if (!rawMaterial) return MATERIAL_OPTIONS[0].value;
   const lower = rawMaterial.toLowerCase();
-
-  // Check if it's already a valid option value
   if (MATERIAL_OPTIONS.some(opt => opt.value === rawMaterial)) return rawMaterial;
-
-  // Keyword matching
   if (lower.includes('데님') || lower.includes('청바지') || lower.includes('denim') || lower.includes('jean')) return 'Old Denim Jeans';
   if (lower.includes('pet') || lower.includes('플라스틱') || lower.includes('plastic') || lower.includes('페트')) return 'Plastic Bottles (PET)';
   if (lower.includes('목재') || lower.includes('나무') || lower.includes('wood') || lower.includes('파렛') || lower.includes('pallet')) return 'Discarded Wood Pallets';
@@ -72,21 +65,16 @@ const resolveMaterialValue = (rawMaterial: string): string => {
   if (lower.includes('커피') || lower.includes('coffee')) return 'Coffee Grounds';
   if (lower.includes('골판지') || lower.includes('cardboard') || lower.includes('박스')) return 'Cardboard';
   if (lower.includes('hdpe') || lower.includes('병뚜껑') || lower.includes('플라스틱')) return 'Waste Plastic (HDPE)';
-
-  // Default: first option if no match
   return MATERIAL_OPTIONS[0].value;
 };
 
-// Infer processing method from step descriptions
 const inferProcessingMethod = (steps: any[]): string => {
   if (!Array.isArray(steps) || steps.length === 0) return '';
   const allText = steps.map((s: any) => `${s.title || ''} ${s.desc || s.description || ''}`).join(' ').toLowerCase();
-
   if (allText.includes('열') || allText.includes('가열') || allText.includes('heat') || allText.includes('용해') || allText.includes('녹')) return 'heat';
   if (allText.includes('재단') || allText.includes('절단') || allText.includes('자르') || allText.includes('cut') || allText.includes('가위')) return 'cut';
   if (allText.includes('접착') || allText.includes('화학') || allText.includes('chem')) return 'chem';
   if (allText.includes('조립') || allText.includes('결합') || allText.includes('바느질') || allText.includes('재봉')) return 'manual';
-
   return '';
 };
 
@@ -124,8 +112,8 @@ const TRANSLATIONS = {
       modelFormats: '.STL, .GLB, .DXF, .DWG, .PDF (파일당 최대 10MB)',
       diffLevels: {
         Easy: '쉬움',
-        Intermediate: '보통',
-        Advanced: '어려움'
+        Medium: '보통',
+        Hard: '어려움'
       }
     },
     steps: {
@@ -189,8 +177,8 @@ const TRANSLATIONS = {
       modelFormats: '.STL, .GLB, .DXF, .DWG, .PDF (Max 10MB each)',
       diffLevels: {
         Easy: 'Easy',
-        Intermediate: 'Intermediate',
-        Advanced: 'Advanced'
+        Medium: 'Medium',
+        Hard: 'Hard'
       }
     },
     steps: {
@@ -241,7 +229,15 @@ const DROPDOWN_TRANSLATIONS = {
       'chem': '화학적 처리 (Chemical)',
       'manual': '수작업 (Manual Only)'
     },
-    categories: ['가구 (Furniture)', '홈 데코 (Home Decor)', '조명 (Lighting)', '주방 (Kitchen)', '패션 (Fashion)', '예술 (Art)', '기타 (Others)'],
+    categories: [
+      { label: '가구 (Furniture)', value: 'furniture' },
+      { label: '홈 데코 (Home Decor)', value: 'home_decor' },
+      { label: '조명 (Lighting)', value: 'lighting' },
+      { label: '주방 (Kitchen)', value: 'kitchen' },
+      { label: '패션 (Fashion)', value: 'fashion' },
+      { label: '예술 (Art)', value: 'art' },
+      { label: '기타 (Others)', value: 'others' }
+    ],
     sourcePlaceholder: '예: 제주 시청 클린하우스, 함덕 해변 (구체적일수록 신뢰도 상승)'
   },
   en: {
@@ -261,32 +257,33 @@ const DROPDOWN_TRANSLATIONS = {
       'chem': 'Chemical Processing',
       'manual': 'Manual Only'
     },
-    categories: ['Furniture', 'Home Decor', 'Lighting', 'Kitchen', 'Fashion', 'Art', 'Others'],
+    categories: [
+      { label: 'Furniture', value: 'furniture' },
+      { label: 'Home Decor', value: 'home_decor' },
+      { label: 'Lighting', value: 'lighting' },
+      { label: 'Kitchen', value: 'kitchen' },
+      { label: 'Fashion', value: 'fashion' },
+      { label: 'Art', value: 'art' },
+      { label: 'Others', value: 'others' }
+    ],
     sourcePlaceholder: 'e.g. Jeju City Hall, Hamdeok Beach (Specific location increases reliability)'
   }
 };
 
 const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadComplete, language, user, onSelectProject, initialProject }) => {
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'inventory'
+  const [activeTab, setActiveTab] = useState('upload');
   const [inventory, setInventory] = useState([]);
-
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-
-  // R2 File State - Changed to array for multiple files
   const [modelFiles, setModelFiles] = useState<File[]>([]);
-
-  // Edit Mode State: Track existing assets to avoid re-uploading
   const [existingImages, setExistingImages] = useState<string[]>([]);
   const [existingModels, setExistingModels] = useState<any[]>([]);
-  // AI-generated image entries with label tags (mutable so delete works)
   const [aiImageEntries, setAiImageEntries] = useState<{ key: string; url: string; label: string }[]>([]);
-
   const [isR2Configured, setIsR2Configured] = useState(false);
-
-  // User nickname state - fetched from user_profiles table
   const [userNickname, setUserNickname] = useState<string>('');
+  const [ecoValidation, setEcoValidation] = useState<any>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const t = TRANSLATIONS[language];
   const t_dropdown = DROPDOWN_TRANSLATIONS[language];
@@ -309,24 +306,13 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     ]
   });
 
-  // Populate form if editing
   useEffect(() => {
     if (initialProject) {
-      console.log("Editing project metadata parsing:", initialProject);
       try {
         let parsedSteps = [{ title: '', desc: '', tip: '', imageFile: null as File | null, imageUrl: '' }];
-        
         const rawSteps1 = initialProject.steps;
         const rawSteps2 = (initialProject.metadata as any)?.fabrication_guide;
         const rawSteps3 = (initialProject.metadata as any)?.guide?.steps;
-        
-        console.log("🔍 Step Sources:", {
-          "initialProject.steps": rawSteps1,
-          "metadata.fabrication_guide": rawSteps2,
-          "metadata.guide.steps": rawSteps3,
-          "metadata (full)": initialProject.metadata
-        });
-        
         let targetSteps = null;
         if (Array.isArray(rawSteps1) && rawSteps1.length > 0) targetSteps = rawSteps1;
         else if (Array.isArray(rawSteps2) && rawSteps2.length > 0) targetSteps = rawSteps2;
@@ -357,54 +343,31 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
             processingMethod: (initialProject.metadata as any)?.processing_method || inferProcessingMethod(targetSteps || []),
             steps: parsedSteps
         });
+        
+        const meta = initialProject.metadata as any;
+        const seenUrls = new Set<string>();
+        const entries: any[] = [];
+        if (Array.isArray(meta?.images)) {
+          meta.images.forEach((url: string, idx: number) => {
+            if (url && !seenUrls.has(url)) { seenUrls.add(url); entries.push({ key: `img_${idx}`, url, label: idx === 0 ? '컨셉 이미지' : '도면' }); }
+          });
+        }
+        setAiImageEntries(entries);
+        if (initialProject.images && initialProject.images.length > 0) setExistingImages(initialProject.images);
+        else if (initialProject.image) setExistingImages([initialProject.image]);
+        if (initialProject.modelFiles) setExistingModels(initialProject.modelFiles);
+        if ((initialProject.metadata as any)?.eco_validation) setEcoValidation((initialProject.metadata as any).eco_validation);
       } catch (err) {
         console.error("Critical error while parsing initial project data for editing:", err);
       }
-
-      // Build AI image entries for the edit panel
-      const meta = initialProject.metadata as any;
-      const labels: Record<string, string> = {
-        concept: '컨셉 이미지', blueprint: '도면', detailed: '상세도', mechanical: '조립 가이드'
-      };
-      const entries: { key: string; url: string; label: string }[] = [];
-      const seenUrls = new Set<string>();
-      if (Array.isArray(meta?.images)) {
-        meta.images.forEach((url: string, idx: number) => {
-          if (url && !seenUrls.has(url)) { seenUrls.add(url); entries.push({ key: `img_${idx}`, url, label: idx === 0 ? labels.concept : labels.blueprint }); }
-        });
-      }
-      if (meta?.blueprint_url && !seenUrls.has(meta.blueprint_url)) { seenUrls.add(meta.blueprint_url); entries.push({ key: 'blueprint', url: meta.blueprint_url, label: labels.blueprint }); }
-      if (meta?.additional_blueprints?.detailed && !seenUrls.has(meta.additional_blueprints.detailed)) { seenUrls.add(meta.additional_blueprints.detailed); entries.push({ key: 'detailed', url: meta.additional_blueprints.detailed, label: labels.detailed }); }
-      if (meta?.additional_blueprints?.mechanical && !seenUrls.has(meta.additional_blueprints.mechanical)) { seenUrls.add(meta.additional_blueprints.mechanical); entries.push({ key: 'mechanical', url: meta.additional_blueprints.mechanical, label: labels.mechanical }); }
-      setAiImageEntries(entries);
-
-      // Set existing assets
-      if (initialProject.images && initialProject.images.length > 0) {
-        setExistingImages(initialProject.images);
-        // Don't set previewUrls, we'll handle display separately or merge them visually
-      } else if (initialProject.image) {
-        setExistingImages([initialProject.image]);
-      }
-
-      if (initialProject.modelFiles) {
-        setExistingModels(initialProject.modelFiles);
-      }
-
-      if ((initialProject.metadata as any)?.eco_validation) {
-        setEcoValidation((initialProject.metadata as any).eco_validation);
-      }
     }
-  }, [initialProject]);
-
-  const [ecoValidation, setEcoValidation] = useState<any>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
+  }, [initialProject, user]);
 
   const handleVerifyEco = async () => {
     if (!formData.title || !formData.material || !formData.steps[0].desc) {
       alert("분석을 위해 프로젝트 제목, 재료, 그리고 최소 1개의 제작 단계를 입력해주세요.");
       return;
     }
-
     setIsVerifying(true);
     try {
       const result = await verifyEcoScore({
@@ -423,32 +386,17 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     }
   };
 
-  // Check R2 Configuration on mount
   useEffect(() => {
-    if (checkR2Config()) {
-      setIsR2Configured(true);
-    }
+    if (checkR2Config()) setIsR2Configured(true);
   }, []);
 
-  // Fetch user's custom nickname from user_profiles table
   useEffect(() => {
     const fetchUserNickname = async () => {
-      if (!user) {
-        setUserNickname('');
-        return;
-      }
+      if (!user) { setUserNickname(''); return; }
       try {
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('nickname')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (profile?.nickname) {
-          setUserNickname(profile.nickname);
-        } else {
-          setUserNickname(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
-        }
+        const { data: profile } = await supabase.from('user_profiles').select('nickname').eq('user_id', user.id).maybeSingle();
+        if (profile?.nickname) setUserNickname(profile.nickname);
+        else setUserNickname(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
       } catch (err) {
         setUserNickname(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Maker');
       }
@@ -456,38 +404,22 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     fetchUserNickname();
   }, [user, supabase]);
 
-  // --- Inventory Data Fetching & Bucket Check ---
   const fetchInventory = async () => {
     try {
-      const { data, error } = await supabase
-        .from('items')
-        .select('id, title, image_url, category, difficulty, created_at, is_public, owner_id, likes, views')
-        .neq('category', 'Social') // Filter out community posts
-        .order('created_at', { ascending: false })
-        .limit(50);
-
+      const { data, error } = await supabase.from('items').select('id, title, image_url, category, difficulty, created_at, is_public, owner_id, likes, views').neq('category', 'Social').order('created_at', { ascending: false }).limit(50);
       if (error) throw error;
-
-      if (data) {
-        setInventory(data);
-      }
+      if (data) setInventory(data);
     } catch (error) {
       console.error("Fetch Error:", error);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'inventory') {
-      fetchInventory();
-    }
+    if (activeTab === 'inventory') fetchInventory();
   }, [activeTab]);
 
-  // --- Step Management Handlers ---
   const addStep = () => {
-    setFormData({
-      ...formData,
-      steps: [...formData.steps, { title: '', desc: '', tip: '', imageFile: null, imageUrl: '' }]
-    });
+    setFormData({ ...formData, steps: [...formData.steps, { title: '', desc: '', tip: '', imageFile: null as File | null, imageUrl: '' }] });
   };
 
   const removeStep = (index: number) => {
@@ -498,23 +430,25 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   const updateStep = (index: number, field: string, value: any) => {
     const newSteps = [...formData.steps];
     (newSteps[index] as any)[field] = value;
+    if (index === newSteps.length - 1) {
+      const currentStep = newSteps[index];
+      if (currentStep.title.trim() !== '' && currentStep.desc.trim() !== '') {
+        newSteps.push({ title: '', desc: '', tip: '', imageFile: null, imageUrl: '' });
+      }
+    }
     setFormData({ ...formData, steps: newSteps });
   };
 
-  // --- Handlers ---
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles: File[] = Array.from(e.target.files as FileList);
       setImageFiles(prev => [...prev, ...newFiles]);
-      const newUrls = newFiles.map(file => URL.createObjectURL(file)); // Re-add this line
+      const newUrls = newFiles.map(file => URL.createObjectURL(file));
       setPreviewUrls(prev => [...prev, ...newUrls]);
     }
   };
 
-  const removeExistingImage = (index: number) => {
-    setExistingImages(prev => prev.filter((_, i) => i !== index));
-  };
-
+  const removeExistingImage = (index: number) => setExistingImages(prev => prev.filter((_, i) => i !== index));
   const removeImage = (index: number) => {
     setImageFiles(prev => prev.filter((_, i) => i !== index));
     setPreviewUrls(prev => prev.filter((_, i) => i !== index));
@@ -522,28 +456,16 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   const handleModelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const newFiles: File[] = Array.from(e.target.files as FileList);
-
-      // Validate file size (10MB)
-      const validFiles = newFiles.filter(file => {
-        if (file.size > MAX_FILE_SIZE) {
-          alert(`${t.alert.sizeError} (${file.name})`);
-          return false;
-        }
+      const validFiles = Array.from(e.target.files as FileList).filter(file => {
+        if (file.size > MAX_FILE_SIZE) { alert(`${t.alert.sizeError} (${file.name})`); return false; }
         return true;
       });
-
       setModelFiles(prev => [...prev, ...validFiles]);
     }
   };
 
-  const removeModelFile = (index: number) => {
-    setModelFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const removeExistingModel = (index: number) => {
-    setExistingModels(prev => prev.filter((_, i) => i !== index));
-  };
+  const removeModelFile = (index: number) => setModelFiles(prev => prev.filter((_, i) => i !== index));
+  const removeExistingModel = (index: number) => setExistingModels(prev => prev.filter((_, i) => i !== index));
 
   const optimizeImage = (file: File): Promise<File> => {
     return new Promise((resolve, reject) => {
@@ -554,324 +476,124 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         let width = img.width;
         let height = img.height;
         const MAX_WIDTH = 1920;
-
-        if (width > MAX_WIDTH) {
-          height = Math.round((height * MAX_WIDTH) / width);
-          width = MAX_WIDTH;
-        }
-
+        if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Canvas context failed'));
-          return;
-        }
+        if (!ctx) { reject(new Error('Canvas context failed')); return; }
         ctx.drawImage(img, 0, 0, width, height);
-
         canvas.toBlob((blob) => {
-          if (!blob) {
-            reject(new Error('Image compression failed'));
-            return;
-          }
-          // Convert original extension to .webp
+          if (!blob) { reject(new Error('Image compression failed')); return; }
           const fileName = file.name.replace(/\.[^/.]+$/, "") + ".webp";
-          const optimizedFile = new File([blob], fileName, {
-            type: 'image/webp',
-            lastModified: Date.now(),
-          });
-          resolve(optimizedFile);
-        }, 'image/webp', 0.85); // 85% quality
+          resolve(new File([blob], fileName, { type: 'image/webp', lastModified: Date.now() }));
+        }, 'image/webp', 0.85);
       };
       img.onerror = (error) => reject(error);
     });
   };
 
-  // Add Auto-Unit Logic
   const handleMaterialChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedValue = e.target.value;
     const option = MATERIAL_OPTIONS.find(opt => opt.value === selectedValue);
-    setFormData({
-      ...formData,
-      material: selectedValue,
-      materialUnit: option ? option.unit : 'kg' // Auto-set unit
-    });
+    setFormData({ ...formData, material: selectedValue, materialUnit: option ? option.unit : 'kg' });
   };
-
-
-
-
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Allow if we have existing images even if no NEW images
     if (imageFiles.length === 0 && existingImages.length === 0) { alert(t.visuals.selectImage); return; }
-
     setLoading(true);
-    const uploadedImageUrls: string[] = [];
-
     try {
-      // 1. Optimize and Upload Images to Cloudflare R2
+      const uploadedImageUrls: string[] = [];
       for (const imageFile of imageFiles) {
-        try {
-          console.log(`Optimizing image: ${imageFile.name}...`);
-          const optimizedFile = await optimizeImage(imageFile);
-          console.log(`Uploading optimized image (${(optimizedFile.size / 1024).toFixed(2)}KB) to R2...`);
-
-          const url = await uploadToR2(optimizedFile, 'images');
-          uploadedImageUrls.push(url);
-        } catch (err: any) {
-          console.error(`Failed to process image ${imageFile.name}:`, err);
-          // Fallback to uploading original if optimization fails, or just warn
-          try {
-            const url = await uploadToR2(imageFile, 'images');
-            uploadedImageUrls.push(url);
-          } catch (fallbackErr) {
-            console.error("Fallback upload also failed", fallbackErr);
-          }
-        }
+        const optimizedFile = await optimizeImage(imageFile);
+        const url = await uploadToR2(optimizedFile, 'images');
+        uploadedImageUrls.push(url);
       }
-      // Build a set of which URLs the user kept (from aiImageEntries after deletions)
-      const survivingUrlSet = new Set(aiImageEntries.map(e => e.url));
-
-      // metadata.images should ONLY contain the original main display URLs (concept + blueprint)
-      // NOT additional_blueprints — those remain in their own metadata fields
+      const survivingUrlSet = new Set([...aiImageEntries.map(e => e.url), ...existingImages]);
       const originalMetaImages: string[] = (initialProject?.metadata as any)?.images || existingImages || [];
-      const savedMainImages = [
-        ...originalMetaImages.filter(u => survivingUrlSet.has(u)),  // keep only surviving originals
-        ...uploadedImageUrls                                           // add new uploads
-      ];
-      const allImageUrls = savedMainImages;
-      const finalImageUrl = allImageUrls[0] || initialProject?.image || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80';
+      const savedMainImages = [...originalMetaImages.filter(u => survivingUrlSet.has(u)), ...uploadedImageUrls];
+      const finalImageUrl = savedMainImages.length > 0 ? savedMainImages[0] : (initialProject?.image || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80');
 
-
-      // 2. Upload Model Files to Cloudflare R2 (Multiple)
       const uploadedModels = [];
-      if (modelFiles.length > 0) {
-        if (!isR2Configured) {
-          alert(t.alert.r2ConfigError);
-        }
-
-        for (const file of modelFiles) {
-          const url = await uploadToR2(file, 'models');
-          uploadedModels.push({
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            url: url
-          });
-        }
+      for (const file of modelFiles) {
+        const url = await uploadToR2(file, 'models');
+        uploadedModels.push({ name: file.name, size: file.size, type: file.type, url });
       }
-
       const allModelFiles = [...existingModels, ...uploadedModels];
 
-      // 2.5 Upload Step Images
       const processedSteps = await Promise.all(formData.steps.map(async (step) => {
         let finalStepImageUrl = step.imageUrl;
-        if (step.imageFile) {
-          try {
-            console.log(`Uploading step image...`);
-            finalStepImageUrl = await uploadToR2(step.imageFile, 'steps');
-          } catch (err) {
-            console.error("Failed to upload step image", err);
-          }
-        }
-        // Return step without function/file objects for JSON storage
-        return {
-          title: step.title,
-          desc: step.desc,
-          tip: step.tip,
-          imageUrl: finalStepImageUrl
-        };
+        if (step.imageFile) finalStepImageUrl = await uploadToR2(step.imageFile, 'steps');
+        return { title: step.title, desc: step.desc, tip: step.tip, imageUrl: finalStepImageUrl };
       }));
 
-      // 3. Save Data to Database using Supabase SDK
       const commonData = {
-        title: formData.title,
-        material: formData.material,
-        category: formData.category,
-        difficulty: formData.difficulty,
-        co2_reduction: parseFloat(formData.co2),
-        estimated_time: formData.time,
-        required_tools: formData.tools,
-        image_url: finalImageUrl,
-        is_ai_generated: formData.isAI,
-        is_public: true, // Admin uploads are public by default
+        title: formData.title, material: formData.material, category: formData.category, difficulty: formData.difficulty,
+        co2_reduction: parseFloat(formData.co2), estimated_time: formData.time, required_tools: formData.tools,
+        image_url: finalImageUrl, is_ai_generated: formData.isAI, is_public: false,
         metadata: {
-          // 1. Preserve ALL original AI metadata (blueprint, model, materials_list, eco_impact, guide etc.)
-          ...(initialProject?.metadata as any || {}),
-          // 2. Overwrite only the fields that the user actively edits
-          fabrication_guide: processedSteps,
-          model_files: allModelFiles,
-          download_url: allModelFiles.length > 0 ? allModelFiles[0].url : (initialProject?.metadata as any)?.download_url || '',
-          images: allImageUrls,
-          // Clear blueprint & additional blueprint URLs if the user deleted them
-          blueprint_url: survivingUrlSet.has((initialProject?.metadata as any)?.blueprint_url) ? (initialProject?.metadata as any)?.blueprint_url : null,
-          additional_blueprints: {
-            detailed: survivingUrlSet.has((initialProject?.metadata as any)?.additional_blueprints?.detailed) ? (initialProject?.metadata as any)?.additional_blueprints?.detailed : null,
-            mechanical: survivingUrlSet.has((initialProject?.metadata as any)?.additional_blueprints?.mechanical) ? (initialProject?.metadata as any)?.additional_blueprints?.mechanical : null,
-          },
-          tools: formData.tools,
-          material_qty: formData.materialQty,
-          material_unit: formData.materialUnit,
-          source_location: formData.sourceLocation,
-          processing_method: formData.processingMethod,
-          eco_validation: ecoValidation || (initialProject?.metadata as any)?.eco_validation,
-          eco_score: ecoValidation?.recalculated_eco_score || formData.co2 || (initialProject?.metadata as any)?.eco_score,
-          maker_name: initialProject?.maker || userNickname || (initialProject?.metadata as any)?.maker_name || 'Maker'
+          ...(initialProject?.metadata as any || {}), fabrication_guide: processedSteps, model_files: allModelFiles,
+          download_url: allModelFiles.length > 0 ? allModelFiles[0].url : '', images: savedMainImages,
+          tools: formData.tools, material_qty: formData.materialQty, material_unit: formData.materialUnit,
+          source_location: formData.sourceLocation, processing_method: formData.processingMethod,
+          eco_validation: ecoValidation, eco_score: ecoValidation?.recalculated_eco_score || formData.co2,
+          maker_name: userNickname || 'Maker'
         }
       };
 
-      let resultData;
+      const { data, error } = initialProject 
+        ? await supabase.from('items').update(commonData).eq('id', initialProject.id).select()
+        : await supabase.from('items').insert([{ ...commonData, owner_id: user?.id }]).select();
 
-      if (initialProject) {
-        // UPDATE EXISTING
-        const { data, error } = await supabase
-          .from('items')
-          .update(commonData)
-          .eq('id', initialProject.id)
-          .select();
-
-        if (error) throw error;
-        resultData = data;
-        alert(language === 'ko' ? '프로젝트가 수정되었습니다.' : 'Project updated successfully.');
-      } else {
-        // INSERT NEW
-        const { data, error } = await supabase
-          .from('items')
-          .insert([{
-            ...commonData,
-            owner_id: user?.id, // Only set owner on creation
-          }])
-          .select();
-
-        if (error) throw error;
-        resultData = data;
-        alert(t.alert.success);
-      }
-
-      const newProject: Project = {
-        id: initialProject ? initialProject.id : Date.now().toString(), // Use existing ID if editing
-        title: formData.title,
-        maker: initialProject?.maker || userNickname || 'Maker', // Use fetched nickname
-        image: finalImageUrl,
-        images: allImageUrls,
-        category: formData.category,
-        time: formData.time || '2h',
-        difficulty: formData.difficulty as 'Easy' | 'Medium' | 'Hard',
-        isAiRemix: formData.isAI,
-        description: `Project: ${formData.title}. Material: ${formData.material}`,
-        steps: processedSteps as any[],
-        downloadUrl: allModelFiles.length > 0 ? allModelFiles[0].url : '',
-        modelFiles: allModelFiles
-      };
-
-      onUploadComplete(newProject);
-
+      if (error) throw error;
+      const realId = data?.[0]?.id?.toString() || (initialProject?.id || Date.now().toString());
+      onUploadComplete({
+        id: realId, title: formData.title, maker: userNickname || 'Maker', image: finalImageUrl, images: savedMainImages,
+        category: formData.category, time: formData.time || '2h', difficulty: formData.difficulty as any,
+        isAiRemix: formData.isAI, description: `Project: ${formData.title}`, steps: processedSteps as any[],
+        downloadUrl: allModelFiles.length > 0 ? allModelFiles[0].url : '', modelFiles: allModelFiles
+      });
+      alert(initialProject ? '수정되었습니다.' : '게시되었습니다.');
     } catch (error: any) {
-      alert(`${t.alert.error}${error.message}`);
-      console.error(error);
+      alert(`오류: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="flex h-screen w-full bg-[#f6f8f7] dark:bg-[#05120d] dark:bg-gradient-to-br dark:from-[#0d2a1f] dark:to-[#05120d] text-slate-900 dark:text-slate-100 font-sans selection:bg-[#10b77f] selection:text-white overflow-hidden">
+  const isIdentityComplete = formData.title.trim() !== '' && formData.category !== '' && formData.time.trim() !== '';
+  const isMaterialComplete = formData.material !== '' && formData.materialQty !== '' && formData.sourceLocation.trim() !== '';
+  const isProcessComplete = formData.tools.trim() !== '' && formData.processingMethod !== '';
+  const isFilesComplete = (modelFiles.length > 0 || existingModels.length > 0);
+  const isStepsStarted = formData.steps.some(s => s.title.trim() !== '' || s.desc.trim() !== '');
 
-      {/* Sidebar - Design preserved */}
-      <aside className="w-20 lg:w-72 flex-shrink-0 flex flex-col justify-between bg-[#0d1b17] border-r border-white/5 h-full transition-all duration-300">
+  const showAll = !!initialProject;
+
+  return (
+    <div className="flex h-screen w-full bg-[#f6f8f7] dark:bg-[#05120d] text-slate-900 dark:text-slate-100 font-sans overflow-hidden">
+      <aside className="w-20 lg:w-72 flex-shrink-0 flex flex-col justify-between bg-[#0d1b17] border-r border-white/5 h-full transition-all">
         <div className="flex flex-col gap-8 p-6">
           <div className="flex items-center gap-3 px-2 cursor-pointer" onClick={onBack}>
-            <div className="bg-[#10b77f]/20 p-2 rounded-xl">
-              <Recycle className="text-[#10b77f] w-7 h-7" />
-            </div>
-            <h1 className="text-white text-lg font-bold tracking-tight hidden lg:block">Jeju Re-Maker</h1>
+            <div className="bg-[#10b77f]/20 p-2 rounded-xl"><Recycle className="text-[#10b77f] w-7 h-7" /></div>
+            <h1 className="text-white text-lg font-bold hidden lg:block">Jeju Re-Maker</h1>
           </div>
           <nav className="flex flex-col gap-2">
-            <button
-              onClick={() => setActiveTab('upload')}
-              className={`flex items-center gap-3 px-4 py-3 rounded-full transition-all group ${activeTab === 'upload' ? 'bg-[#10b77f] text-white shadow-[0_0_15px_rgba(16,183,127,0.3)]' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-            >
-              <UploadCloud className="w-5 h-5" />
-              <p className="text-sm font-medium hidden lg:block">{t.sidebar.upload}</p>
-            </button>
-            {/* Inventory Item Removed as per request */}
+            <button onClick={() => setActiveTab('upload')} className={`flex items-center gap-3 px-4 py-3 rounded-full ${activeTab === 'upload' ? 'bg-[#10b77f] text-white shadow-lg shadow-[#10b77f]/30' : 'text-gray-400 hover:text-white'}`}><UploadCloud className="w-5 h-5" /><p className="text-sm font-medium hidden lg:block">{t.sidebar.upload}</p></button>
+            <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-3 px-4 py-3 rounded-full ${activeTab === 'inventory' ? 'bg-[#10b77f] text-white shadow-lg shadow-[#10b77f]/30' : 'text-gray-400 hover:text-white'}`}><HardDrive className="w-5 h-5" /><p className="text-sm font-medium hidden lg:block">{t.sidebar.inventory}</p></button>
           </nav>
         </div>
-
       </aside>
 
       <main className="flex-1 flex flex-col h-full overflow-y-auto relative bg-[#f6f8f7] dark:bg-transparent">
-        {/* Header - Design preserved */}
         <header className="sticky top-0 z-20 bg-white/80 dark:bg-[#0d2118]/80 backdrop-blur-md border-b border-gray-200/50 dark:border-white/5 px-8 py-5 flex justify-between items-center">
           <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-              {activeTab === 'upload' ? t.header.uploadTitle : t.header.inventoryTitle}
-            </h2>
-            <p className="text-slate-500 text-sm mt-1">
-              {activeTab === 'upload' ? t.header.uploadDesc : t.header.inventoryDesc}
-            </p>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{activeTab === 'upload' ? t.header.uploadTitle : t.header.inventoryTitle}</h2>
+            <p className="text-slate-500 text-sm mt-1">{activeTab === 'upload' ? t.header.uploadDesc : t.header.inventoryDesc}</p>
           </div>
-
-          {/* Eco Badge (Real-time / Verified) */}
-          {activeTab === 'upload' && (
-            <div className="hidden md:flex items-center gap-4 bg-emerald-50/50 border border-emerald-100 px-4 py-2 rounded-2xl">
-              <div className={`p-2 rounded-full ${ecoValidation?.is_consistent ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
-                {isVerifying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Recycle className="w-5 h-5" />}
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">ECO IMPACT</p>
-                <p className="text-sm font-bold text-slate-900">
-                  {ecoValidation ? ecoValidation.eco_badge : 'Start typing to analyze'}
-                </p>
-              </div>
-              {ecoValidation && (
-                <div className="text-right pl-4 border-l border-emerald-200">
-                  <p className="text-[10px] text-slate-400">Reliability</p>
-                  <p className="text-lg font-black text-emerald-600 leading-none">{ecoValidation.data_reliability_score}<span className="text-xs text-emerald-400">/10</span></p>
-                </div>
-              )}
-            </div>
-          )}
-
           {activeTab === 'upload' && (
             <div className="flex gap-3 items-center">
-              {/* Verification Stat (Visible only when verified) */}
-              {ecoValidation && (
-                <div className="flex flex-col items-end mr-4 hidden xl:flex">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Verified Score</span>
-                  <div className="flex items-center gap-1">
-                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${ecoValidation.grade === 'A' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{ecoValidation.grade || 'B'}</span>
-                    <span className="text-sm font-bold text-slate-700">-{Number(ecoValidation.recalculated_eco_score).toFixed(2)}kg</span>
-                  </div>
-                </div>
-              )}
-
-              <button
-                onClick={handleVerifyEco}
-                disabled={isVerifying}
-                className={`px-4 py-2.5 rounded-full font-medium text-sm transition-all flex items-center gap-2 border ${isVerifying ? 'bg-slate-100 text-slate-400 border-transparent' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'}`}
-              >
-                {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-yellow-400" />}
-                {isVerifying ? '분석 중...' : 'AI 가치 분석'}
-              </button>
-
-              <div className="h-8 w-px bg-gray-200 mx-1"></div>
-
-              <button className="px-6 py-2.5 rounded-full text-slate-600 font-medium text-sm hover:bg-slate-100 transition-colors">{t.header.saveDraft}</button>
-              <button
-                onClick={handleUpload}
-                disabled={loading || !ecoValidation}
-                className={`px-6 py-2.5 rounded-full bg-[#10b77f] text-white font-medium text-sm shadow-lg shadow-[#10b77f]/30 transition-all flex items-center gap-2 
-                    ${loading || !ecoValidation ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:shadow-[#10b77f]/50 hover:-translate-y-0.5'}
-                `}
-                title={!ecoValidation ? "AI 가치 분석을 먼저 완료해주세요" : ""}
-              >
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-
-                {loading ? t.header.publishing : t.header.publish}
-              </button>
+              <button onClick={handleVerifyEco} disabled={isVerifying} className="px-4 py-2.5 rounded-full bg-white text-slate-700 border flex items-center gap-2 hover:bg-slate-50">{isVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-yellow-400" />}{isVerifying ? '분석 중...' : 'AI 가치 분석'}</button>
+              <button onClick={handleUpload} disabled={loading} className="px-6 py-2.5 rounded-full bg-[#10b77f] text-white font-medium text-sm flex items-center gap-2 shadow-lg shadow-[#10b77f]/30 hover:shadow-[#10b77f]/50">{loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}{loading ? t.header.publishing : t.header.publish}</button>
             </div>
           )}
         </header>
@@ -879,598 +601,130 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         <div className="p-8 max-w-5xl mx-auto w-full pb-32">
           {activeTab === 'upload' ? (
             <>
-              {/* Basic Information Section */}
-              <section className="mb-10">
-                <div className="flex items-center gap-2 mb-4 px-2">
-                  <Info className="w-5 h-5 text-[#10b77f]" />
-                  <h3 className="text-lg font-bold text-slate-800">{t.basicInfo.title}</h3>
-                </div>
-                <div className="bg-white dark:bg-[#152e25]/60 backdrop-blur-xl p-8 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100 dark:border-white/5 flex flex-col gap-8">
-
-                  {/* Group A: Project Identity */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100">
-                      <Info className="w-5 h-5 text-[#10b77f]" />
-                      <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider">1. Project Identity</h4>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="col-span-1 md:col-span-2 flex flex-col gap-2">
-                        <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.projectTitle}</label>
-                        <input
-                          value={formData.title}
-                          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                          className="w-full bg-slate-50 dark:bg-black/30 border-0 text-slate-900 dark:text-white rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white dark:focus:bg-black/50 transition-all placeholder:text-slate-400 font-medium outline-none"
-                          placeholder={t.basicInfo.projectTitlePlaceholder}
-                          type="text"
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.category}</label>
-                        <div className="relative">
-                          <select
-                            value={formData.category}
-                            onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                            className="w-full bg-slate-50 dark:bg-black/30 border-0 text-slate-900 dark:text-white rounded-full px-6 py-4 appearance-none focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white dark:focus:bg-black/50 transition-all font-medium outline-none"
-                          >
-                            {t_dropdown.categories.map(cat => <option key={cat}>{cat}</option>)}
-                          </select>
-                          <ChevronRight className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <label className="text-slate-700 text-sm font-semibold ml-2">{t.basicInfo.time}</label>
-                        <div className="relative">
-                          <input
-                            value={formData.time}
-                            onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                            className="w-full bg-slate-50 dark:bg-black/30 border-0 text-slate-900 dark:text-white rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white dark:focus:bg-black/50 transition-all placeholder:text-slate-400 font-medium outline-none"
-                            placeholder={t.basicInfo.timePlaceholder}
-                            type="text"
-                          />
-                          <Clock className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-slate-400" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Group B: Material & Eco Data */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100">
-                      <Recycle className="w-5 h-5 text-[#10b77f]" />
-                      <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider">2. Material & Eco Data</h4>
-                    </div>
-
-                    <div className="flex flex-col gap-4">
-                      <label className="text-slate-700 dark:text-slate-300 text-sm font-semibold ml-2">{t.basicInfo.material}</label>
-                      <div className="flex flex-col md:flex-row gap-4">
-                        <div className="relative flex-[2]">
-                          <select
-                            value={formData.material}
-                            onChange={handleMaterialChange}
-                            className="w-full bg-slate-50 dark:bg-black/30 border-0 text-slate-900 dark:text-white rounded-full px-6 py-4 appearance-none focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white dark:focus:bg-black/50 transition-all font-medium outline-none"
-                          >
-                            {MATERIAL_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {t_dropdown.materials[opt.value as keyof typeof t_dropdown.materials]}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronRight className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
-                        </div>
-                        <div className="flex flex-1 gap-2">
-                          <input
-                            type="number"
-                            placeholder="Qty"
-                            value={formData.materialQty}
-                            onChange={(e) => setFormData({ ...formData, materialQty: e.target.value })}
-                            className="w-full bg-slate-50 dark:bg-black/30 border-0 text-slate-900 dark:text-white rounded-full px-6 py-4 text-center font-bold outline-none focus:ring-2 focus:ring-[#10b77f]/20"
-                          />
-                          <select
-                            value={formData.materialUnit}
-                            onChange={(e) => setFormData({ ...formData, materialUnit: e.target.value })}
-                            className="w-24 bg-slate-50 dark:bg-black/30 border-0 text-slate-500 dark:text-slate-400 rounded-full px-2 py-4 text-center font-bold outline-none appearance-none"
-                          >
-                            <option>kg</option>
-                            <option>g</option>
-                            <option>ea</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <label className="text-slate-700 dark:text-slate-300 text-sm font-semibold ml-2 mt-2">수거처 (Source Location)</label>
-                      <input
-                        type="text"
-                        placeholder={t_dropdown.sourcePlaceholder}
-                        value={formData.sourceLocation}
-                        onChange={(e) => setFormData({ ...formData, sourceLocation: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-black/30 border-0 text-slate-900 dark:text-white rounded-full px-6 py-4 focus:ring-2 focus:ring-[#10b77f]/20 outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Group C: Fabrication Process */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100">
-                      <Hammer className="w-5 h-5 text-[#10b77f]" />
-                      <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider">3. Fabrication Process</h4>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="flex flex-col gap-2">
-                        <label className="text-slate-700 dark:text-slate-300 text-sm font-semibold ml-2">{t.basicInfo.tools} <span className="text-[10px] text-slate-400 font-normal">(Enter로 태그 추가)</span></label>
-                        <div className="w-full bg-slate-50 dark:bg-black/30 border-0 rounded-[2rem] px-6 py-4 focus-within:ring-2 focus-within:ring-[#10b77f]/20 focus-within:bg-white dark:focus-within:bg-black/50 transition-all flex flex-wrap gap-2 items-center min-h-[56px]">
-                          {formData.tools.split(',').filter(t => t.trim() !== '').map((tool, idx) => (
-                            <span key={idx} className="bg-white dark:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1 shadow-sm">
-                              {tool.trim()}
-                              <button
-                                onClick={() => {
-                                  const newTools = formData.tools.split(',').filter((_, i) => i !== idx).join(',');
-                                  setFormData({ ...formData, tools: newTools });
-                                }}
-                                className="hover:text-red-500 rounded-full p-0.5 transition-colors"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </span>
-                          ))}
-                          <input
-                            type="text"
-                            className="bg-transparent outline-none flex-1 min-w-[120px] text-slate-900 dark:text-white placeholder:text-slate-400 font-medium"
-                            placeholder={formData.tools ? "" : t.basicInfo.toolsPlaceholder}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const val = e.currentTarget.value.trim();
-                                if (val) {
-                                  const current = formData.tools ? formData.tools.split(',') : [];
-                                  if (!current.includes(val)) {
-                                    setFormData({ ...formData, tools: [...current, val].join(',') });
-                                  }
-                                  e.currentTarget.value = '';
-                                }
-                              } else if (e.key === 'Backspace' && e.currentTarget.value === '' && formData.tools) {
-                                const current = formData.tools.split(',');
-                                current.pop();
-                                setFormData({ ...formData, tools: current.join(',') });
-                              }
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <label className="text-slate-700 dark:text-slate-300 text-sm font-semibold ml-2">가공 방식</label>
-                        <div className="relative">
-                          <select
-                            value={formData.processingMethod}
-                            onChange={(e) => setFormData({ ...formData, processingMethod: e.target.value })}
-                            className="w-full bg-slate-50 dark:bg-[#1e1e1e] border-0 text-slate-900 dark:text-white rounded-full px-6 py-4 appearance-none focus:ring-2 focus:ring-[#10b77f]/20 focus:bg-white dark:focus:bg-[#252525] transition-all font-medium outline-none"
-                          >
-                            <option value="">{t_dropdown.processing['']}</option>
-                            <option value="heat">{t_dropdown.processing['heat']}</option>
-                            <option value="cut">{t_dropdown.processing['cut']}</option>
-                            <option value="chem">{t_dropdown.processing['chem']}</option>
-                            <option value="manual">{t_dropdown.processing['manual']}</option>
-                          </select>
-                          <ChevronRight className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Verification Banner if Verified */}
-                    {ecoValidation && (
-                      <div className={`mt-4 p-4 rounded-2xl border ${ecoValidation.is_consistent ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h4 className={`font-bold ${ecoValidation.is_consistent ? 'text-emerald-800' : 'text-amber-800'}`}>
-                              {ecoValidation.is_consistent ? '✅ 데이터 일치 확인됨' : '⚠️ 데이터 불일치 감지'}
-                            </h4>
-                            <p className="text-sm text-slate-600 mt-1">{ecoValidation.suggestions}</p>
-                          </div>
-                          {ecoValidation.calculation_basis && (
-                            <div className="hidden md:block text-right bg-white/50 px-3 py-2 rounded-xl border border-black/5">
-                              <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Calculation Basis</p>
-                              <p className="text-xs font-mono text-slate-600">{ecoValidation.calculation_basis}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Old Verification Button Removed (Moved to Header) */}
-                  </div>
-
-
-
-                  {/* R2 Upload Section (Multiple Files) */}
-                  <div className="flex flex-col gap-2">
-                    <label className="text-slate-700 text-sm font-semibold ml-2 flex items-center gap-2">
-                      <Box className="w-4 h-4 text-[#f48120]" />
-                      {t.basicInfo.modelFile}
-                    </label>
-
-                    {/* AI-generated images (from state - supports delete) */}
-                    {aiImageEntries.length > 0 && (
-                      <div className="mb-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-semibold text-slate-500 ml-1">🤖 AI 생성 이미지 ({aiImageEntries.length}장)</p>
-                          <label className="cursor-pointer text-xs font-semibold text-[#10b77f] flex items-center gap-1 hover:underline">
-                            <PlusCircle className="w-3.5 h-3.5" /> 이미지 추가
-                            <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageChange} />
-                          </label>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                          {aiImageEntries.map((entry) => (
-                            <div key={entry.key} className="relative group/img aspect-video rounded-xl overflow-hidden border border-[#10b77f]/30">
-                              <img src={entry.url} alt={entry.label} className="w-full h-full object-cover" />
-                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-white text-xs font-bold bg-black/50 px-2 py-1 rounded-full">열기</a>
-                                <button
-                                  type="button"
-                                  onClick={() => setAiImageEntries(prev => prev.filter(e => e.key !== entry.key))}
-                                  className="text-red-400 text-xs font-bold bg-black/50 px-2 py-1 rounded-full hover:text-red-300"
-                                >
-                                  삭제
-                                </button>
-                              </div>
-                              <div className="absolute top-1 left-1 bg-black/70 text-[#10b77f] text-[9px] font-bold px-1.5 py-0.5 rounded-full">{entry.label}</div>
-                            </div>
-                          ))}
-                          {/* Newly added image previews */}
-                          {previewUrls.map((url, idx) => (
-                            <div key={`new_${idx}`} className="relative group/img aspect-video rounded-xl overflow-hidden border border-blue-400/40">
-                              <img src={url} alt={`새 이미지 ${idx + 1}`} className="w-full h-full object-cover" />
-                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
-                                <button type="button" onClick={() => removeImage(idx)} className="text-red-400 text-xs font-bold bg-black/50 px-2 py-1 rounded-full">삭제</button>
-                              </div>
-                              <div className="absolute top-1 left-1 bg-blue-500/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">새 이미지</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Existing model files (AI-generated 3D or previously uploaded) */}
-                    {existingModels.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-xs font-semibold text-slate-500 ml-1 mb-2">📁 저장된 제작 파일</p>
-                        <div className="grid gap-2">
-                          {existingModels.map((file: any, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-white dark:bg-white/5 p-3 rounded-xl border border-[#10b77f]/20 shadow-sm">
-                              <div className="flex items-center gap-3 overflow-hidden">
-                                <div className="bg-[#10b77f]/10 p-1.5 rounded-lg">
-                                  <FileBox className="w-4 h-4 text-[#10b77f]" />
-                                </div>
-                                <div className="flex flex-col items-start min-w-0">
-                                  <span className="font-medium text-sm truncate w-full text-slate-700 dark:text-slate-200">{file.name}</span>
-                                  <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#10b77f] underline">다운로드</a>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => removeExistingModel(idx)}
-                                className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* New File Drop Zone */}
-                    <div className="relative group">
-                      <input
-                        type="file"
-                        multiple
-                        accept=".stl,.obj,.glb,.gltf,.dxf,.dwg,.pdf,.svg,.ai,.png"
-                        onChange={handleModelChange}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                      />
-                      <div className={`w-full bg-slate-50 dark:bg-black/30 border-2 border-dashed ${modelFiles.length > 0 ? 'border-[#10b77f] bg-[#10b77f]/5' : 'border-slate-200 dark:border-white/10'} rounded-2xl px-6 py-8 flex flex-col items-center justify-center text-center transition-all group-hover:border-[#10b77f]/50 group-hover:bg-slate-100 dark:group-hover:bg-white/5`}>
-                        {modelFiles.length > 0 ? (
-                          <div className="w-full flex flex-col gap-2">
-                            <div className="flex items-center justify-center gap-2 text-[#10b77f] mb-2">
-                              <FileBox className="w-6 h-6" />
-                              <span className="font-bold">{modelFiles.length} files selected</span>
-                            </div>
-                            <div className="grid gap-2 max-h-48 overflow-y-auto w-full px-2 z-20">
-                              {modelFiles.map((file, idx) => (
-                                <div key={idx} className="flex items-center justify-between bg-white dark:bg-white/5 p-3 rounded-xl border border-[#10b77f]/20 shadow-sm relative z-20">
-                                  <div className="flex items-center gap-3 overflow-hidden">
-                                    <div className="bg-[#10b77f]/10 p-1.5 rounded-lg">
-                                      <FileBox className="w-4 h-4 text-[#10b77f]" />
-                                    </div>
-                                    <div className="flex flex-col items-start min-w-0">
-                                      <span className="font-medium text-sm truncate w-full text-slate-700">{file.name}</span>
-                                      <span className="text-[10px] text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                                    </div>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      removeModelFile(idx);
-                                    }}
-                                    className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors z-30"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                            <p className="text-slate-400 text-xs mt-2">Click area to add more files</p>
-                          </div>
-                        ) : (
-                          <>
-                            <UploadCloud className="w-8 h-8 text-slate-400 mb-2 group-hover:scale-110 transition-transform" />
-                            <p className="text-slate-600 font-medium">{t.basicInfo.modelDragDrop}</p>
-                            <p className="text-slate-400 text-xs mt-1">{t.basicInfo.modelFormats}</p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {/* R2 Warning Alert */}
-                    {!isR2Configured && (
-                      <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-amber-700 text-sm">
-                        <AlertTriangle className="w-5 h-5 shrink-0" />
-                        <div>
-                          <p className="font-bold">R2 Key Configuration Needed</p>
-                          <p className="text-xs mt-1 text-amber-600">
-                            To enable real file uploads, you must set your Cloudflare R2 Account ID, Access Key, and Secret Key in <code>components/AdminUpload.tsx</code>. Currently using mock uploads.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex flex-col gap-4 mt-6 border-t border-slate-50 pt-6">
-                    <label className="text-slate-700 text-sm font-semibold ml-2 flex items-center gap-2">
-                      <Settings className="w-4 h-4 text-[#10b77f]" />
-                      Project Settings
-                    </label>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {/* AI Toggle */}
-                      <div className="flex items-center justify-between bg-slate-50 dark:bg-black/30 p-4 rounded-2xl border border-gray-100 dark:border-white/5">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-xl transition-colors ${formData.isAI ? 'bg-primary/20 text-primary' : 'bg-gray-200 dark:bg-white/10 text-gray-500 dark:text-gray-400'}`}>
-                            <span className="material-icons-round text-sm">auto_awesome</span>
-                          </div>
-                          <div>
-                            <p className="text-sm font-bold text-slate-800">{language === 'ko' ? 'AI 생성물' : 'AI Generated'}</p>
-                            <p className="text-[10px] text-slate-500">{language === 'ko' ? 'AI 리믹스 또는 아이디어로 표시됩니다' : 'Marked as AI Remix or Idea'}</p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFormData({ ...formData, isAI: !formData.isAI })}
-                          className={`w-12 h-6 rounded-full transition-all relative ${formData.isAI ? 'bg-primary' : 'bg-gray-300 dark:bg-white/20'}`}
-                        >
-                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.isAI ? 'right-1' : 'left-1'}`}></div>
-                        </button>
-                      </div>
-
-                      {/* Difficulty Selector */}
-                      <div className="flex flex-col gap-2">
-                        <label className="text-slate-700 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider ml-2">{t.basicInfo.difficulty}</label>
-                        <div className="flex p-1 bg-slate-100 dark:bg-black/30 rounded-full w-full">
-                          {['Easy', 'Intermediate', 'Advanced'].map((level) => (
-                            <button
-                              key={level}
-                              type="button"
-                              onClick={() => setFormData({ ...formData, difficulty: level })}
-                              className={`flex-1 py-2 rounded-full text-xs font-bold transition-all ${formData.difficulty === level ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
-                            >
-                              {t.basicInfo.diffLevels[level as 'Easy' | 'Intermediate' | 'Advanced'] || level}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+              {/* Stage 1: Identity */}
+              <section className="mb-10 animate-fade-in-up">
+                <div className="flex items-center gap-2 mb-4 px-2"><Info className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">1. Project Identity</h3></div>
+                <div className="bg-white dark:bg-[#152e25]/60 p-8 rounded-[2rem] border border-gray-100 dark:border-white/5 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="col-span-2 flex flex-col gap-2"><label className="text-sm font-semibold ml-2">{t.basicInfo.projectTitle}</label><input value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4 outline-none focus:ring-2 focus:ring-[#10b77f]/20" placeholder={t.basicInfo.projectTitlePlaceholder} /></div>
+                    <div className="flex flex-col gap-2"><label className="text-sm font-semibold ml-2">{t.basicInfo.category}</label><select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4 appearance-none outline-none">{t_dropdown.categories.map(cat => <option key={cat.value} value={cat.value}>{cat.label}</option>)}</select></div>
+                    <div className="flex flex-col gap-2"><label className="text-sm font-semibold ml-2">{t.basicInfo.time}</label><div className="relative"><input value={formData.time} onChange={(e) => setFormData({ ...formData, time: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4 outline-none" placeholder={t.basicInfo.timePlaceholder} /><Clock className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400" /></div></div>
                   </div>
                 </div>
               </section>
 
-              {/* Fabrication Steps Section */}
-              <section className="mb-10">
-                <div className="flex items-center justify-between mb-4 px-2">
-                  <div className="flex items-center gap-2">
-                    <Hammer className="w-5 h-5 text-[#10b77f]" />
-                    <h3 className="text-lg font-bold text-slate-800">{t.steps.title}</h3>
+              {/* Stage 2: Material */}
+              {(showAll || isIdentityComplete) && (
+                <section className="mb-10 animate-fade-in-up">
+                  <div className="flex items-center gap-2 mb-4 px-2"><Recycle className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">2. Material & Eco Data</h3></div>
+                  <div className="bg-white dark:bg-[#152e25]/60 p-8 rounded-[2rem] border border-gray-100 dark:border-white/5 space-y-6">
+                     <div className="flex flex-col gap-4">
+                       <label className="text-sm font-semibold ml-2">{t.basicInfo.material}</label>
+                       <div className="flex flex-col md:flex-row gap-4">
+                         <div className="flex-[2]"><select value={formData.material} onChange={handleMaterialChange} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4">{MATERIAL_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{t_dropdown.materials[opt.value as keyof typeof t_dropdown.materials] || opt.label}</option>)}</select></div>
+                         <div className="flex-1 flex gap-2"><input type="number" value={formData.materialQty} onChange={(e) => setFormData({ ...formData, materialQty: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4 text-center font-bold" /><select value={formData.materialUnit} onChange={(e) => setFormData({ ...formData, materialUnit: e.target.value })} className="w-24 bg-slate-50 dark:bg-black/30 rounded-full px-2"><option>kg</option><option>g</option><option>ea</option></select></div>
+                       </div>
+                       <label className="text-sm font-semibold ml-2 mt-2">수거처 (Source Location)</label>
+                       <input type="text" placeholder={t_dropdown.sourcePlaceholder} value={formData.sourceLocation} onChange={(e) => setFormData({ ...formData, sourceLocation: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4" />
+                     </div>
                   </div>
-                  <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{t.steps.dynamic}</span>
-                </div>
-                <div className="flex flex-col gap-4">
-                  {formData.steps.map((step, index) => (
-                    <div key={index} className="group bg-white dark:bg-[#152e25]/60 backdrop-blur-xl p-6 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100 dark:border-white/5 relative hover:border-[#10b77f]/30 transition-colors">
-                      <div className="absolute left-6 top-6 bg-slate-100 dark:bg-black/30 text-slate-600 dark:text-slate-300 size-8 rounded-full flex items-center justify-center font-bold text-sm">{index + 1}</div>
+                </section>
+              )}
 
-                      {formData.steps.length > 1 && (
-                        <button onClick={() => removeStep(index)} className="absolute right-6 top-6 text-slate-300 hover:text-rose-500 transition-colors">
-                          <X className="w-5 h-5" />
-                        </button>
-                      )}
-
-                      <div className="pl-12 flex flex-col md:flex-row gap-6">
-                        {/* Inputs */}
-                        <div className="flex-1 flex flex-col gap-4">
-                          <input
-                            value={step.title}
-                            onChange={(e) => updateStep(index, 'title', e.target.value)}
-                            className="w-full bg-transparent border-0 border-b border-gray-200 dark:border-white/10 text-slate-900 dark:text-white px-0 py-2 focus:ring-0 focus:border-[#10b77f] text-lg font-semibold placeholder:text-slate-300 transition-colors"
-                            placeholder={t.steps.stepTitle}
-                            type="text"
-                          />
-                          <textarea
-                            value={step.desc}
-                            onChange={(e) => updateStep(index, 'desc', e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-black/30 border-0 text-slate-600 dark:text-slate-300 rounded-2xl px-4 py-3 focus:ring-2 focus:ring-[#10b77f]/20 transition-all resize-none text-sm leading-relaxed"
-                            placeholder={t.steps.descPlaceholder}
-                            rows={3}
-                          ></textarea>
-                          <div className="bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-100 dark:border-yellow-900/30 rounded-2xl p-4 flex gap-3 items-start">
-                            <Lightbulb className="text-yellow-500 w-5 h-5 mt-0.5" />
-                            <div className="flex-1">
-                              <p className="text-xs font-bold text-yellow-700 dark:text-yellow-500 uppercase mb-1">{t.steps.expertTip}</p>
-                              <input
-                                value={step.tip}
-                                onChange={(e) => updateStep(index, 'tip', e.target.value)}
-                                className="w-full bg-transparent border-0 p-0 text-sm text-yellow-900 dark:text-yellow-200 placeholder:text-yellow-900/40 dark:placeholder:text-yellow-200/40 focus:ring-0"
-                                placeholder={t.steps.tipPlaceholder}
-                                type="text"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Step Image Upload */}
-                        <div className="w-full md:w-48 flex-shrink-0 flex flex-col gap-2">
-                          <div className="w-full aspect-video md:aspect-square bg-slate-50 dark:bg-black/30 border-2 border-dashed border-slate-200 dark:border-white/10 rounded-xl flex flex-col items-center justify-center relative overflow-hidden group/image hover:border-[#10b77f] transition-colors">
-                            {step.imageFile || step.imageUrl ? (
-                              <>
-                                <img
-                                  src={step.imageFile ? URL.createObjectURL(step.imageFile) : step.imageUrl}
-                                  className="absolute inset-0 w-full h-full object-cover"
-                                />
-                                <button
-                                  onClick={() => {
-                                    updateStep(index, 'imageFile', null);
-                                    updateStep(index, 'imageUrl', '');
-                                  }}
-                                  className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover/image:opacity-100 transition-opacity"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <ImageIcon className="w-8 h-8 text-slate-300 mb-2" />
-                                <span className="text-xs text-slate-400 font-medium">사진 추가</span>
-                              </>
-                            )}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="absolute inset-0 opacity-0 cursor-pointer"
-                              onChange={(e) => {
-                                if (e.target.files?.[0]) {
-                                  updateStep(index, 'imageFile', e.target.files[0]);
-                                }
-                              }}
-                            />
-                          </div>
-                          <p className="text-[10px] text-center text-slate-400">단계별 사진 (선택)</p>
-                        </div>
-                      </div>
+              {/* Stage 3: Process */}
+              {(showAll || isMaterialComplete) && (
+                <section className="mb-10 animate-fade-in-up">
+                  <div className="flex items-center gap-2 mb-4 px-2"><Hammer className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">3. Fabrication Process</h3></div>
+                  <div className="bg-white dark:bg-[#152e25]/60 p-8 rounded-[2rem] border border-gray-100 dark:border-white/5 space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="flex flex-col gap-2"><label className="text-sm font-semibold ml-2">{t.basicInfo.tools}</label><div className="w-full bg-slate-50 dark:bg-black/30 rounded-[2rem] px-6 py-4 flex flex-wrap gap-2 items-center min-h-[56px]">{formData.tools.split(',').filter(t => t.trim() !== '').map((tool, idx) => (<span key={idx} className="bg-white dark:bg-white/10 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1">{tool.trim()}<button onClick={() => { const newTools = formData.tools.split(',').filter((_, i) => i !== idx).join(','); setFormData({ ...formData, tools: newTools }); }}><X className="w-3 h-3" /></button></span>))}<input type="text" className="bg-transparent outline-none flex-1 min-w-[120px]" placeholder={formData.tools ? "" : t.basicInfo.toolsPlaceholder} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const val = e.currentTarget.value.trim(); if (val) { const current = formData.tools ? formData.tools.split(',') : []; if (!current.includes(val)) setFormData({ ...formData, tools: [...current, val].join(',') }); e.currentTarget.value = ''; } } }} /></div></div>
+                      <div className="flex flex-col gap-2"><label className="text-sm font-semibold ml-2">가공 방식</label><select value={formData.processingMethod} onChange={(e) => setFormData({ ...formData, processingMethod: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4">{Object.entries(t_dropdown.processing).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}</select></div>
                     </div>
-                  ))}
-
-                  <button
-                    onClick={addStep}
-                    className="w-full py-4 rounded-[2rem] border-2 border-dashed border-slate-200 dark:border-white/10 text-slate-400 hover:border-[#10b77f] hover:text-[#10b77f] hover:bg-[#10b77f]/5 transition-all flex items-center justify-center gap-2 group"
-                  >
-                    <PlusCircle className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                    <span className="font-semibold">{t.steps.addStep}</span>
-                  </button>
-                </div>
-              </section>
-
-              {/* Visual Assets Section */}
-              <section className="mb-10">
-                <div className="flex items-center gap-2 mb-4 px-2">
-                  <ImageIcon className="w-5 h-5 text-[#10b77f]" />
-                  <h3 className="text-lg font-bold text-slate-800 dark:text-white">{t.visuals.title}</h3>
-                </div>
-                <div className="bg-white dark:bg-[#152e25]/60 backdrop-blur-xl p-8 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100 dark:border-white/5">
-                  <div className="w-full min-h-64 rounded-3xl bg-slate-50 dark:bg-black/30 border-2 border-dashed border-slate-200 dark:border-white/10 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-black/50 hover:border-[#10b77f]/50 transition-all group relative overflow-hidden">
-                    <input className="absolute inset-0 opacity-0 cursor-pointer z-10" type="file" accept="image/*" multiple onChange={handleImageChange} />
-                    {previewUrls.length > 0 ? (
-                      <div className="w-full p-4 grid grid-cols-2 gap-4">
-                        {previewUrls.map((url, index) => (
-                          <div key={index} className="relative group/img">
-                            <img src={url} className="w-full h-40 object-cover rounded-2xl" alt={`Preview ${index + 1}`} />
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); removeImage(index); }}
-                              className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
-                            >
-                              <span className="material-icons-round text-sm">close</span>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <>
-                        <div className="bg-white dark:bg-[#252525] p-4 rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform duration-300">
-                          <UploadCloud className="text-[#10b77f] w-8 h-8" />
-                        </div>
-                        <h4 className="text-slate-900 dark:text-white font-semibold text-lg">{t.visuals.dragDrop}</h4>
-                        <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{t.visuals.formats}</p>
-                      </>
-                    )}
                   </div>
-                </div>
-              </section>
+                </section>
+              )}
+
+              {/* Stage 4: Files */}
+              {(showAll || isProcessComplete) && (
+                <section className="mb-10 animate-fade-in-up">
+                  <div className="flex items-center gap-2 mb-4 px-2"><Settings className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">4. Files & Settings</h3></div>
+                  <div className="bg-white dark:bg-[#152e25]/60 p-8 rounded-[2rem] border border-gray-100 dark:border-white/5 space-y-8">
+                    <div className="flex flex-col gap-2">
+                       <label className="text-sm font-semibold ml-2 flex items-center gap-2"><Box className="w-4 h-4 text-[#f48120]" />{t.basicInfo.modelFile}</label>
+                       <div className="relative group"><input type="file" multiple accept=".stl,.obj,.glb,.gltf,.dxf,.dwg,.pdf,.svg,.ai,.png" onChange={handleModelChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" /><div className="w-full bg-slate-50 dark:bg-black/30 border-2 border-dashed rounded-2xl px-6 py-8 flex items-center justify-center"><p className="text-slate-400">{modelFiles.length > 0 ? `${modelFiles.length} files selected` : t.basicInfo.modelDragDrop}</p></div></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-6 pt-6 border-t border-slate-50">
+                       <div className="flex items-center justify-between bg-slate-50 dark:bg-black/30 p-4 rounded-2xl"><p className="text-sm font-bold">AI Generated</p><button onClick={() => setFormData({ ...formData, isAI: !formData.isAI })} className={`w-12 h-6 rounded-full relative ${formData.isAI ? 'bg-primary' : 'bg-gray-300'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.isAI ? 'right-1' : 'left-1'}`} /></button></div>
+                       <div className="flex p-1 bg-slate-100 rounded-full">{['Easy', 'Medium', 'Hard'].map(level => <button key={level} onClick={() => setFormData({ ...formData, difficulty: level as any })} className={`flex-1 py-2 rounded-full text-xs font-bold ${formData.difficulty === level ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>{level}</button>)}</div>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {/* Stage 5: Steps */}
+              {(showAll || isFilesComplete) && (
+                <section className="mb-10 animate-fade-in-up">
+                  <div className="flex items-center gap-2 mb-4 px-2"><Hammer className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">5. Fabrication Steps</h3></div>
+                  <div className="flex flex-col gap-4">
+                    {formData.steps.map((step, index) => {
+                      const isFirst = index === 0;
+                      const prevStep = index > 0 ? formData.steps[index - 1] : null;
+                      const isPrevComplete = prevStep && prevStep.title.trim() !== '' && prevStep.desc.trim() !== '';
+                      const hasCurrentContent = step.title.trim() !== '' || step.desc.trim() !== '';
+                      if (!isFirst && !isPrevComplete && !hasCurrentContent) return null;
+                      return (
+                        <div key={index} className="bg-white dark:bg-[#152e25]/60 p-6 rounded-[2rem] border border-gray-100 dark:border-white/5 relative animate-fade-in-up">
+                          <div className="flex flex-col md:flex-row gap-6 pl-8">
+                             <div className="flex-1 space-y-4">
+                               <input value={step.title} onChange={(e) => updateStep(index, 'title', e.target.value)} className="w-full bg-transparent border-0 border-b text-lg font-semibold" placeholder={`Step ${index + 1} Title`} />
+                               <textarea value={step.desc} onChange={(e) => updateStep(index, 'desc', e.target.value)} className="w-full bg-slate-50 dark:bg-black/30 rounded-2xl p-4 text-sm" placeholder="Step description..." rows={3} />
+                             </div>
+                             <div className="w-full md:w-32 aspect-square bg-slate-50 dark:bg-black/30 rounded-xl flex items-center justify-center relative overflow-hidden border-2 border-dashed">
+                               {step.imageFile || step.imageUrl ? <img src={step.imageFile ? URL.createObjectURL(step.imageFile) : step.imageUrl} className="absolute inset-0 w-full h-full object-cover" /> : <ImageIcon className="text-slate-300" />}
+                               <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => e.target.files?.[0] && updateStep(index, 'imageFile', e.target.files[0])} />
+                             </div>
+                          </div>
+                          {formData.steps.length > 1 && <button onClick={() => removeStep(index)} className="absolute right-4 top-4 text-slate-300 hover:text-red-500"><X className="w-5 h-5" /></button>}
+                        </div>
+                      );
+                    })}
+                    <button onClick={addStep} className="w-full py-4 rounded-[2rem] border-2 border-dashed text-slate-400 hover:border-[#10b77f] hover:text-[#10b77f] flex items-center justify-center gap-2"><PlusCircle /><span>Add Step</span></button>
+                  </div>
+                </section>
+              )}
+
+              {/* Stage 6: Visual Assets */}
+              {(showAll || isStepsStarted) && (
+                <section className="mb-10 animate-fade-in-up">
+                  <div className="flex items-center gap-2 mb-4 px-2"><ImageIcon className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">6. Visual Assets</h3></div>
+                  <div className="bg-white dark:bg-[#152e25]/60 p-8 rounded-[2rem] border border-gray-100 dark:border-white/5">
+                    <div className="w-full min-h-48 rounded-3xl bg-slate-50 dark:bg-black/30 border-2 border-dashed flex flex-col items-center justify-center cursor-pointer relative overflow-hidden">
+                      <input type="file" accept="image/*" multiple onChange={handleImageChange} className="absolute inset-0 opacity-0 z-10 cursor-pointer" />
+                      {(existingImages.length > 0 || previewUrls.length > 0) ? (
+                        <div className="grid grid-cols-3 gap-4 p-4 w-full">
+                          {existingImages.map((url, i) => <img key={i} src={url} className="w-full aspect-video object-cover rounded-lg" />)}
+                          {previewUrls.map((url, i) => <img key={i} src={url} className="w-full aspect-video object-cover rounded-lg border-2 border-[#10b77f]" />)}
+                        </div>
+                      ) : <p className="text-slate-400">Upload Project Images</p>}
+                    </div>
+                  </div>
+                </section>
+              )}
             </>
           ) : (
-            /* Inventory View - Styled to match */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {inventory.length > 0 ? inventory.map((item: any) => (
-                <div
-                  key={item.id}
-                  onClick={() => {
-                    // Map DB item to Project type before selecting
-                    const project: Project = {
-                      id: item.id.toString(),
-                      title: item.title,
-                      maker: item.metadata?.maker_name || userNickname || 'Maker',
-                      image: item.image_url,
-                      images: item.metadata?.images || [],
-                      category: item.category,
-                      time: item.estimated_time,
-                      difficulty: item.difficulty,
-                      isAiRemix: item.is_ai_generated,
-                      description: item.metadata?.description || item.description,
-                      steps: item.metadata?.fabrication_guide || [],
-                      downloadUrl: item.metadata?.download_url,
-                      modelFiles: item.metadata?.model_files || [],
-                      isPublic: item.is_public,
-                      ownerId: item.owner_id,
-                      likes: item.likes,
-                      views: item.views,
-                      createdAt: item.created_at,
-                      tools: item.metadata?.tools || item.required_tools,
-                      material: item.material
-                    };
-                    onSelectProject(project);
-                  }}
-                  className="bg-white p-6 rounded-[2rem] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-gray-100 hover:shadow-lg transition-all cursor-pointer group"
-                >
+                <div key={item.id} onClick={() => onSelectProject({ ...item, id: item.id.toString(), maker: item.metadata?.maker_name || 'Maker', steps: item.metadata?.fabrication_guide || [] })} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group">
                   <div className="aspect-video bg-slate-100 rounded-2xl mb-4 overflow-hidden relative">
-                    <img src={item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80'} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                    <div className="absolute top-3 left-3 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-[#10b77f] shadow-sm uppercase">{item.category}</div>
+                    <img src={item.image_url || 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80'} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                   </div>
-                  <h4 className="font-bold text-slate-900 mb-1 group-hover:text-[#10b77f] transition-colors">{item.title}</h4>
-                  <p className="text-xs text-slate-500 mb-4">{item.material}</p>
-                  <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                    <div className="flex items-center gap-1 text-xs font-semibold text-slate-600">
-                      <Clock className="w-3 h-3" /> {item.estimated_time}
-                    </div>
-                    <button className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-[#10b77f] group-hover:text-white transition-all">
-                      <ArrowUpRight className="w-4 h-4" />
-                    </button>
+                  <h4 className="font-bold text-slate-900 mb-1 group-hover:text-[#10b77f]">{item.title}</h4>
+                   <div className="flex justify-between items-center pt-4 border-t border-slate-50">
+                    <span className="text-xs text-slate-500 truncate">{item.material}</span>
+                    <ArrowUpRight className="w-4 h-4 text-slate-300" />
                   </div>
                 </div>
-              )) : (
-                <div className="col-span-full py-20 text-center">
-                  <p className="text-slate-400 font-medium">{t.inventory.noItems}</p>
-                </div>
-              )}
+              )) : <div className="col-span-full py-20 text-center text-slate-400">No items found</div>}
             </div>
           )}
         </div>

@@ -20,11 +20,12 @@ import { saveAs } from 'file-saver';
 import { Project } from '../types';
 import { config } from '../services/config';
 import * as aiService from '../services/aiService';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 import { ReactFlow, Background, applyNodeChanges, applyEdgeChanges, addEdge, Connection, Edge, Node, NodeChange, EdgeChange, ReactFlowInstance } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { CustomNode } from './CustomNode';
 import { supabase } from '../services/supabase';
+import { useNotifications } from '../contexts/NotificationContext';
 import ImageModal from './ImageModal';
 
 const nodeTypes = {
@@ -96,17 +97,21 @@ interface WorkspaceProps {
   onlineUsers?: any[];
   globalChannel?: any;
   currentUserId?: string;
+  initialSelectedPeerId?: string | null;
 }
 
 type TabMode = 'EXPERT' | 'COPILOT';
 
-const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTokens, setUserTokens, initialMode = 'human', isAiProject = false, onlineUsers = [], globalChannel, currentUserId }) => {
+const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTokens, setUserTokens, initialMode = 'human', isAiProject = false, onlineUsers = [], globalChannel, currentUserId, initialSelectedPeerId }) => {
+  const { setActiveChatPartnerId } = useNotifications();
   const [activeTab, setActiveTab] = useState<TabMode>(initialMode === 'ai' ? 'COPILOT' : 'EXPERT');
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const viewerRef = useRef<ThreeDViewerHandle>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const copilotCancelRef = useRef(false);
+  const [activeCopilotTokens, setActiveCopilotTokens] = useState(0);
 
   // React Flow State
   const [nodes, setNodes] = useState<Node[]>(initialNodes as Node[]);
@@ -128,6 +133,81 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
   // Peer Selection State
   const [selectedPeer, setSelectedPeer] = useState<any | null>(null);
+
+  // Auto-select peer from initialSelectedPeerId
+  useEffect(() => {
+    if (initialSelectedPeerId && onlineUsers.length > 0) {
+        const peer = onlineUsers.find(u => u.user_id === initialSelectedPeerId);
+        if (peer) {
+            setSelectedPeer(peer);
+            setActiveTab('EXPERT');
+        }
+    }
+  }, [initialSelectedPeerId, onlineUsers]);
+
+  // Fetch DM history when peer is selected
+  useEffect(() => {
+    if (!selectedPeer || !currentUserId) {
+        setDirectMessages([]);
+        setActiveChatPartnerId(null);
+        return;
+    }
+    
+    // Set active chat partner to suppress duplicate notifications
+    setActiveChatPartnerId(selectedPeer.user_id);
+    
+    const fetchDMHistory = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('direct_messages')
+                .select('*')
+                .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${selectedPeer.user_id}),and(sender_id.eq.${selectedPeer.user_id},receiver_id.eq.${currentUserId})`)
+                .order('created_at', { ascending: true })
+                .limit(50);
+            
+            if (error) throw error;
+            if (data) {
+                const mapped = data.map((m: any) => ({
+                    id: m.id,
+                    role: m.sender_id === currentUserId ? 'user' : 'expert',
+                    name: m.sender_id === currentUserId ? userNickname : selectedPeer.nickname,
+                    time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    content: m.content
+                }));
+                setDirectMessages(mapped);
+            }
+        } catch (e) {
+            console.error("Failed to fetch DM history:", e);
+        }
+    };
+    fetchDMHistory();
+
+    // Subscribe to new DMs for this peer
+    const dmChannel = supabase.channel(`dm-${currentUserId}-${selectedPeer.user_id}`)
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'direct_messages',
+            filter: `receiver_id=eq.${currentUserId}` 
+        }, (payload) => {
+            if (payload.new.sender_id === selectedPeer.user_id) {
+                const newDM = {
+                    id: payload.new.id,
+                    role: 'expert',
+                    name: selectedPeer.nickname,
+                    time: new Date(payload.new.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    content: payload.new.content
+                };
+                setDirectMessages(prev => [...prev, newDM]);
+            }
+        })
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(dmChannel);
+        setActiveChatPartnerId(null);
+    };
+  }, [selectedPeer?.user_id, currentUserId, setActiveChatPartnerId]);
 
   const [syncedMetadata, setSyncedMetadata] = useState<any>(project?.metadata || null);
 
@@ -181,6 +261,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
   // Fetch existing messages from DB on mount
   useEffect(() => {
+    if (!project?.id) return;
     const fetchChatHistory = async () => {
       try {
         const { data, error } = await supabase
@@ -207,11 +288,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
     };
 
     fetchChatHistory();
-  }, [project.id]);
+  }, [project?.id]);
 
   // Set up Supabase Realtime Channel
   useEffect(() => {
-    if (!project.id) return;
+    if (!project?.id) return;
 
     const channel = supabase.channel(`room-${project.id}`)
       .on('broadcast', { event: 'chat_message' }, (payload) => {
@@ -221,9 +302,20 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
         }
       })
       .on('broadcast', { event: 'sync_request' }, (payload) => {
-        console.log("Workspace: Received sync_request (Auto-accepting)", payload.payload);
+        console.log("Workspace: Received sync_request", payload.payload);
         if (payload.payload.clientId !== clientId) {
+           // Receiver unblurs the screen
            setIs3DSyncAccepted(true);
+           // Optional: Show a message that view is shared
+           setExpertMessages(prev => [...prev, {
+             id: Date.now(),
+             role: 'system',
+             name: 'System',
+             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+             content: language === 'ko' 
+               ? `${payload.payload.senderName}님이 화면을 공유했습니다. 이제 3D 뷰어를 자유롭게 조작하실 수 있습니다.` 
+               : `${payload.payload.senderName} has shared their view. You can now control the 3D viewer independently.`
+           }]);
         }
       })
       .on('broadcast', { event: 'camera_sync' }, (payload) => {
@@ -243,7 +335,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [project.id, clientId]);
+  }, [project?.id, clientId]);
 
   // --- React Flow Interactive Handlers ---
   const onNodesChange = useCallback(
@@ -282,6 +374,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
         : 'Hello! I am your Jeju Remaker Copilot. How can I assist your fabrication process?'
     }
   ]);
+  const [directMessages, setDirectMessages] = useState<{ id: string, role: string, name: string, time: string, content: string }[]>([]);
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [attachedImageBase64, setAttachedImageBase64] = useState<string | null>(null);
@@ -293,7 +386,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
   useEffect(() => {
     scrollToBottom();
-  }, [expertMessages, copilotMessages]);
+  }, [expertMessages, copilotMessages, directMessages]);
   // UI State for tagged node
   const [taggedNodeId, setTaggedNodeId] = useState<string | null>(null);
   const [taggedNodeName, setTaggedNodeName] = useState<string | null>(null);
@@ -341,58 +434,94 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
       imageUrl: attachedImageBase64 || undefined
     };
     
+    
     if (activeTab === 'EXPERT') {
       setExpertMessages(prev => [...prev, newTask]);
     } else {
       setCopilotMessages(prev => [...prev, newTask]);
+      copilotCancelRef.current = false;
     }
     
     setIsLoading(true);
 
     try {
       if (activeTab === 'EXPERT') {
-        // 1. Persistent DB Save
-        const { data: dbMsg, error: dbError } = await supabase
-           .from('messages')
-           .insert({
-              project_id: project.id,
-              sender_id: currentUserId,
-              sender_name: userNickname,
-              message_text: userMsg,
-              role: 'user'
-           })
-           .select()
-           .single();
-
-        if (dbError) console.error("Failed to save message to DB:", dbError);
-
-        // 2. Broadcast User Message to Channel for real-time recipients
-        const broadcastMsg = {
-           id: dbMsg?.id || Date.now() + 1,
-           role: 'expert',
-           name: userNickname,
-           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-           content: userMsg
-        };
-        
-        const sendStatus = await channelRef.current?.send({
-            type: 'broadcast',
-            event: 'chat_message',
-            payload: { clientId, message: broadcastMsg }
-        });
-        console.log("Workspace: chat_message broadcast status:", sendStatus);
-
-        // Broadcast to global channel for toaster notifications
-        globalChannel?.send({
-            type: 'broadcast',
-            event: 'chat_notify',
-            payload: {
-               projectId: project.id,
-               projectTitle: project.title,
-               sender: userNickname,
-               message: userMsg
+        if (selectedPeer) {
+            // 1. Send as Direct Message (DM)
+            const { data: dmData, error: dmError } = await supabase
+                .from('direct_messages')
+                .insert({
+                    sender_id: currentUserId,
+                    receiver_id: selectedPeer.user_id,
+                    content: userMsg,
+                    project_id: project.id,
+                    metadata: {
+                        projectTitle: project.title,
+                        senderName: userNickname,
+                        type: 'workspace_chat',
+                        relatedProjectId: project.id
+                    }
+                })
+                .select()
+                .single();
+            
+            if (dmError) {
+                console.error("Failed to send DM:", dmError);
+                return;
             }
-        });
+
+            // Update local DM UI
+            setDirectMessages(prev => [...prev, {
+                id: dmData.id,
+                role: 'user',
+                name: userNickname,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                content: userMsg
+            }]);
+
+        } else {
+            // 1. Persistent DB Save (Project Channel)
+            const { data: dbMsg, error: dbError } = await supabase
+               .from('messages')
+               .insert({
+                  project_id: project.id,
+                  sender_id: currentUserId,
+                  sender_name: userNickname,
+                  message_text: userMsg,
+                  role: 'user'
+               })
+               .select()
+               .single();
+
+            if (dbError) console.error("Failed to save message to DB:", dbError);
+
+            // 2. Broadcast User Message to Channel (Project)
+            const broadcastMsg = {
+               id: dbMsg?.id || Date.now() + 1,
+               role: 'expert',
+               name: userNickname,
+               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+               content: userMsg
+            };
+            
+            await channelRef.current?.send({
+                type: 'broadcast',
+                event: 'chat_message',
+                payload: { clientId, message: broadcastMsg }
+            });
+
+            // Broadcast to global channel for toaster notifications
+            globalChannel?.send({
+                type: 'broadcast',
+                event: 'chat_notify',
+                payload: {
+                   projectId: project.id,
+                   projectTitle: project.title,
+                   sender: userNickname,
+                   message: userMsg
+                }
+            });
+        }
 
       } else {
         // Call AI Copilot (Functional / Node Gen)
@@ -404,8 +533,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
             content: n.data.content as string
         }));
 
+        // --- SECURITY GATE: Check if current user has permission for original fabrication guide ---
+        const hasDetailedAccess = !!(currentUserId && project?.ownerId && currentUserId === project.ownerId);
+
         // 1. Analyze Intent (Pass User Nickname & Attached Image)
-        const analysis: any = await aiService.analyzeCopilotIntent(userMsg, project, recentNodes, taggedNodeId, userNickname, attachedImageBase64);
+        const analysis: any = await aiService.analyzeCopilotIntent(userMsg, project, recentNodes, taggedNodeId, userNickname, attachedImageBase64, hasDetailedAccess);
 
         let requiredTokens = 0;
         if (analysis.type === 'IMAGE_GENERATION') requiredTokens = 5;
@@ -425,7 +557,13 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
                return;
            } else {
                setUserTokens(userTokens - requiredTokens);
+               setActiveCopilotTokens(requiredTokens);
            }
+        }
+
+        if (copilotCancelRef.current) {
+            setIsLoading(false);
+            return;
         }
 
         let replyMessage = analysis.message;
@@ -434,6 +572,12 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
         // 2. Optional: Generate Image if Requested
         if (analysis.type === 'IMAGE_GENERATION') {
             try {
+               // Check for cancellation before image gen
+               if (copilotCancelRef.current) {
+                   setIsLoading(false);
+                   return;
+               }
+
                // Determine reference image for generation based on tagged node or original project (Base Shape)
                // DO NOT use attachedImageBase64 here, as that is the "Style Reference" absorbed by enriched_prompt.
                const referencedNode = nodes.find(n => n.id === taggedNodeId);
@@ -446,8 +590,18 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
                generatedImageUrl = await aiService.generateUpcyclingImage(finalPrompt, config.models.productImage, referenceImageUrl, false, project, userNickname);
             } catch (e) {
                console.error("Image generation failed", e);
+               // If it was cancelled during generation, we handle it in catch or just return
+               if (copilotCancelRef.current) {
+                   setIsLoading(false);
+                   return;
+               }
                replyMessage += " (이미지 생성에 실패했습니다.)";
             }
+        }
+
+        if (copilotCancelRef.current) {
+            setIsLoading(false);
+            return;
         }
 
         // 3. Generate New Node based on parsed info
@@ -539,6 +693,27 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
     } finally {
       setIsLoading(false);
       setAttachedImageBase64(null);
+      setActiveCopilotTokens(0);
+    }
+  };
+
+  const handleCancelCopilot = () => {
+    copilotCancelRef.current = true;
+    setIsLoading(false);
+    
+    if (activeCopilotTokens > 0) {
+      setUserTokens(userTokens + activeCopilotTokens);
+      const refundMsg = {
+        id: Date.now(),
+        role: 'system',
+        name: 'System',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: language === 'ko' 
+          ? `요청이 취소되었습니다. ${activeCopilotTokens} 토큰이 반환되었습니다.`
+          : `Request cancelled. ${activeCopilotTokens} tokens refunded.`
+      };
+      setCopilotMessages(prev => [...prev, refundMsg]);
+      setActiveCopilotTokens(0);
     }
   };
 
@@ -555,14 +730,14 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
      setIs3DSyncAccepted(true);
      
-     // 1. Send sync_request to notify others that I am sharing
+     // 1. Send sync_request to notify others to UNBLUR and SYNC ONCE
      channelRef.current.send({
         type: 'broadcast',
         event: 'sync_request',
         payload: { clientId, senderName: userNickname }
      });
      
-     // 2. Send actual camera position one-time
+     // 2. Send actual camera position for initial alignment
      channelRef.current.send({
         type: 'broadcast',
         event: 'camera_sync',
@@ -573,6 +748,14 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
         }
      }).then(() => {
         console.log("Workspace: Manual view shared.");
+        // Add local feedback message
+        setExpertMessages(prev => [...prev, {
+          id: Date.now(),
+          role: 'system',
+          name: 'System',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          content: language === 'ko' ? '화면을 공유했습니다.' : 'View shared successfully.'
+        }]);
      }).catch(console.error);
   };
 
@@ -714,27 +897,37 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
                {/* PIP 3D Viewer */}
                <div className="absolute bottom-6 left-6 w-[320px] h-[320px] bg-[#050505] rounded-2xl border border-gray-700 shadow-2xl overflow-hidden z-20 group">
-                  <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-black/80 to-transparent z-10 opacity-0 group-hover:opacity-100 transition-opacity flex justify-between px-2 items-center">
-                    <span className="text-[10px] text-gray-300 font-bold ml-1">3D View</span>
+                  <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-black/80 to-transparent z-10 opacity-0 group-hover:opacity-100 transition-opacity flex justify-between px-3 items-center">
+                    <span className="text-[10px] text-gray-300 font-bold">{model3DUrl ? '3D VIEW' : 'PROJECT IMAGE'}</span>
                     <button className="text-gray-400 hover:text-white p-1"><Maximize size={12} /></button>
                   </div>
-                  <ThreeDViewer
-                    ref={viewerRef}
-                    modelUrl={model3DUrl || ''}
-                    className="w-full h-full"
-                    onCameraChange={handleCameraChange}
-                  />
+                  {model3DUrl ? (
+                    <ThreeDViewer
+                      ref={viewerRef}
+                      modelUrl={model3DUrl}
+                      className="w-full h-full"
+                      onCameraChange={handleCameraChange}
+                    />
+                  ) : (
+                    <img 
+                      src={project.image} 
+                      alt={project.title} 
+                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
+                    />
+                  )}
                </div>
                
-               {/* PIP Floating Toolbar */}
-               <div className="absolute left-[360px] bottom-16 z-20 flex flex-col space-y-3 bg-black/60 backdrop-blur-md p-2 rounded-2xl border border-white/10 shadow-2xl">
-                  <button onClick={() => handleTool('rotate')} className="p-2.5 text-gray-400 hover:text-green-400 hover:bg-white/10 rounded-xl transition-all" title="Rotate">
-                    <RotateCcw size={16} />
-                  </button>
-                  <button onClick={() => handleTool('wireframe')} className="p-2.5 text-gray-400 hover:text-green-400 hover:bg-white/10 rounded-xl transition-all" title="Wireframe">
-                    <Grid3X3 size={16} />
-                  </button>
-               </div>
+               {/* PIP Floating Toolbar - Only show for 3D */}
+               {model3DUrl && (
+                 <div className="absolute left-[360px] bottom-16 z-20 flex flex-col space-y-3 bg-black/60 backdrop-blur-md p-2 rounded-2xl border border-white/10 shadow-2xl">
+                    <button onClick={() => handleTool('rotate')} className="p-2.5 text-gray-400 hover:text-green-400 hover:bg-white/10 rounded-xl transition-all" title="Rotate">
+                      <RotateCcw size={16} />
+                    </button>
+                    <button onClick={() => handleTool('wireframe')} className="p-2.5 text-gray-400 hover:text-green-400 hover:bg-white/10 rounded-xl transition-all" title="Wireframe">
+                      <Grid3X3 size={16} />
+                    </button>
+                 </div>
+               )}
             </div>
         ) : (
             // EXPERT MODE: Full Screen 3D Viewer with Sync Lock
@@ -904,7 +1097,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
             </span>
           </div>
 
-          {(activeTab === 'EXPERT' ? expertMessages : copilotMessages).map((msg) => (
+          {(activeTab === 'COPILOT' ? copilotMessages : (selectedPeer ? directMessages : expertMessages)).map((msg) => (
             <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-fade-in`}>
               {msg.role !== 'user' && (
                 <div className="w-8 h-8 rounded-full bg-gray-700 overflow-hidden flex-shrink-0 mt-1">
@@ -941,10 +1134,20 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
             <div className="flex gap-3">
               <div className="w-8 h-8 rounded-full bg-gray-700 flex-shrink-0 mt-1 animate-pulse"></div>
               <div className="bg-[#2A2A2A] px-4 py-3 rounded-2xl rounded-tl-sm border border-gray-700">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                <div className="flex flex-col gap-2">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                  {activeTab === 'COPILOT' && (
+                    <button 
+                      onClick={handleCancelCopilot}
+                      className="text-[10px] text-red-500 font-bold hover:underline text-left mt-1"
+                    >
+                      {language === 'ko' ? '취소하기' : 'Cancel'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

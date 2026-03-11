@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 import { User } from '@supabase/supabase-js';
 import { Project } from '../types';
 
@@ -183,8 +183,12 @@ const Trending: React.FC<TrendingProps> = ({ onNavigate, onProjectSelect, langua
 
         // Sort by popularity score (likes * 2 + views)
         return filtered.sort((a, b) => {
-            const scoreA = ((a.likes || 0) * 2) + (a.views || 0);
-            const scoreB = ((b.likes || 0) * 2) + (b.views || 0);
+            const likesA = Number(a.likes || 0);
+            const likesB = Number(b.likes || 0);
+            const viewsA = Number(a.views || 0);
+            const viewsB = Number(b.views || 0);
+            const scoreA = (likesA * 2) + viewsA;
+            const scoreB = (likesB * 2) + viewsB;
             return scoreB - scoreA;
         });
     }, [projects, selectedCategory, timePeriod]);
@@ -401,7 +405,7 @@ const Trending: React.FC<TrendingProps> = ({ onNavigate, onProjectSelect, langua
                                                     }`}
                                             >
                                                 <span className="material-icons-round text-sm">
-                                                    {likedProjects.has(project.id) ? 'favorite' : 'favorite'}
+                                                    {likedProjects.has(project.id) ? 'favorite' : 'favorite_border'}
                                                 </span>
                                                 {formatNumber(project.likes)}
                                             </button>

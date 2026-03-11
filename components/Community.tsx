@@ -1,7 +1,6 @@
 
-
 import React, { useState, useEffect } from 'react';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
 import { config } from '../services/config';
@@ -150,6 +149,10 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
     };
 
     const handleLike = async (postId: string, currentLikes: number) => {
+        if (!user) {
+            onLoginClick('community');
+            return;
+        }
         const isLiked = likedPosts.has(postId);
         const increment = isLiked ? -1 : 1;
 
@@ -215,7 +218,11 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
     const handleSubmitComment = async (postId: string) => {
         const text = commentText[postId]?.trim();
-        if (!text || !user) return;
+        if (!text) return;
+        if (!user) {
+            onLoginClick('community');
+            return;
+        }
 
         setIsSubmittingComment(postId);
         try {
@@ -473,17 +480,30 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
                         <div key={post.id} className="bg-white dark:bg-surface-darker rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 p-6 relative">
                             <div className="flex justify-between items-center mb-4">
                                 <div className="flex items-center gap-3">
-                                    {post.metadata?.maker_avatar_url ? (
-                                        <img
-                                            src={post.metadata.maker_avatar_url}
-                                            alt={post.maker}
-                                            className="w-10 h-10 rounded-full object-cover border border-gray-100 dark:border-gray-700"
-                                        />
-                                    ) : (
-                                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
-                                            {post.maker.charAt(0)}
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-primary font-bold text-lg overflow-hidden relative ${!post.metadata?.maker_avatar_url ? 'bg-primary/10' : ''}`}>
+                                        {post.metadata?.maker_avatar_url ? (
+                                            <img
+                                                src={post.metadata.maker_avatar_url}
+                                                alt={post.maker}
+                                                className="w-full h-full object-cover"
+                                                onError={(e) => {
+                                                    const img = e.target as HTMLImageElement;
+                                                    img.style.display = 'none';
+                                                    const parent = img.parentElement;
+                                                    if (parent) {
+                                                        parent.classList.add('post-avatar-fallback');
+                                                        parent.classList.add('bg-primary/10');
+                                                    }
+                                                }}
+                                            />
+                                        ) : null}
+                                        <div className="absolute inset-0 items-center justify-center hidden [.post-avatar-fallback_&]:flex">
+                                            {post.maker.charAt(0).toUpperCase()}
                                         </div>
-                                    )}
+                                        {!post.metadata?.maker_avatar_url && (
+                                            post.maker.charAt(0).toUpperCase()
+                                        )}
+                                    </div>
                                     <div>
                                         <div className="flex items-center gap-2">
                                             <span className="font-bold text-gray-900 dark:text-white">{post.maker}</span>
@@ -610,11 +630,28 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
                                         <div className="space-y-4 mb-6">
                                             {post.metadata.comments.map((comment: any, idx: number) => (
                                                 <div key={idx} className="flex gap-3 relative group">
-                                                    <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex-shrink-0 overflow-hidden">
+                                                    <div className={`w-8 h-8 rounded-full flex-shrink-0 overflow-hidden relative flex items-center justify-center ${!comment.userAvatar ? 'bg-gray-200 dark:bg-gray-700' : ''}`}>
                                                         {comment.userAvatar ? (
-                                                            <img src={comment.userAvatar} className="w-full h-full object-cover" loading="lazy" />
-                                                        ) : (
-                                                            <div className="w-full h-full flex items-center justify-center text-xs font-bold text-gray-500">{comment.userName?.charAt(0)}</div>
+                                                            <img 
+                                                                src={comment.userAvatar} 
+                                                                className="w-full h-full object-cover" 
+                                                                loading="lazy" 
+                                                                onError={(e) => {
+                                                                    const img = e.target as HTMLImageElement;
+                                                                    img.style.display = 'none';
+                                                                    const parent = img.parentElement;
+                                                                    if (parent) {
+                                                                        parent.classList.add('comm-avatar-fallback');
+                                                                        parent.classList.add('bg-gray-200', 'dark:bg-gray-700');
+                                                                    }
+                                                                }}
+                                                            />
+                                                        ) : null}
+                                                        <div className="absolute inset-0 items-center justify-center hidden [.comm-avatar-fallback_&]:flex">
+                                                            <span className="text-xs font-bold text-gray-500">{comment.userName?.charAt(0).toUpperCase()}</span>
+                                                        </div>
+                                                        {!comment.userAvatar && (
+                                                            <div className="w-full h-full flex items-center justify-center text-xs font-bold text-gray-500">{comment.userName?.charAt(0).toUpperCase()}</div>
                                                         )}
                                                     </div>
 

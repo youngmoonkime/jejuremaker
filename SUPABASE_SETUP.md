@@ -52,7 +52,19 @@
    - "Users can upload their own images" 정책 존재 확인
    - "Public images are viewable by everyone" 정책 존재 확인
 
-## 4단계: 테스트
+## 4단계: 인증(Authentication) 설정
+
+로컬 개발 환경(`localhost`)에서 로그인이 정상적으로 작동하고, 로그인 후 다시 로컬 서버로 돌아오게 하려면 다음 설정을 반드시 수행해야 합니다.
+
+1. **Supabase 대시보드 → Authentication → URL Configuration** 메뉴로 이동
+2. **Site URL** 확인: 프로덕션 URL(예: `https://jeju-remaker-hub.web.app`)로 설정되어 있는지 확인
+3. **Additional Redirect URLs**에 로컬 URL 추가:
+   - `Add URL` 클릭
+   - `http://localhost:3000/**` 입력 후 저장
+   - (Vite 기본 포트를 사용하는 경우 `http://localhost:5173/**` 추가)
+4. **설정 확인**: 이제 로컬에서 로그인 시 Supabase가 이 URL을 허용된 리다이렉트 경로로 인식하여 로컬 서버로 정상적으로 돌려보냅니다.
+
+## 5단계: 테스트
 
 ### 토큰 시스템 테스트
 

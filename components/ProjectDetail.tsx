@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Language } from '../App';
+import { Language } from '../contexts/ThemeContext';
 import { Project } from '../types';
 import { User } from '@supabase/supabase-js';
 import ThreeDViewer, { ThreeDViewerHandle } from './ThreeDViewer';
@@ -25,7 +25,8 @@ const base64ToBlob = (base64: string, mimeType: string) => {
 
 interface ProjectDetailProps {
   onBack: () => void;
-  onOpenWorkspace: () => void;
+  onEdit: (project: Project) => void;
+  onAnalyze: () => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
   language: Language;
@@ -38,7 +39,12 @@ interface ProjectDetailProps {
   onViewIncrement: (projectId: string) => void;
   likedProjects: Set<string>;
   userTokens: number;
-  onDeductTokens: (amount: number) => void;
+  onDeductTokens: (tokens: number) => void;
+  isOwner?: boolean;
+  isSuperAdmin?: boolean;
+  onViewProfile?: (profileId: string) => void;
+  onStatusChange?: () => void;
+  onMessageClick?: (maker: import('../types').Maker, initialMessage?: string, options?: { relatedProjectId?: string, relatedProjectTitle?: string, accessType?: 'blueprint' | 'blueprint_detailed' | 'blueprint_mechanical' | '3d_model' }) => void;
 }
 
 const TRANSLATIONS = {
@@ -77,7 +83,6 @@ const TRANSLATIONS = {
       { id: '03', title: '조립', desc: '스냅핏 구조로 조립하세요.', imageUrl: '' },
       { id: '04', title: '완성', desc: '완성된 제품을 확인하세요.', imageUrl: '' }
     ],
-    footer: '© 2024 Project Cyclical. 전체 권리 소유.',
     handmade: '핸드메이드',
     isAi: 'AI 생성'
   },
@@ -116,7 +121,6 @@ const TRANSLATIONS = {
       { id: '03', title: 'Post-Processing', desc: 'Remove stringing with a heat gun. If water-tightness is critical, coat the interior with a thin layer of epoxy resin or a specialized sealant.', imageUrl: 'https://images.unsplash.com/photo-1581092918056-0c4c3acd3789?w=800&auto=format&fit=crop' },
       { id: '04', title: 'Assembly', desc: 'Place the saucer under the main body. Fill with soil and your favorite plant.', imageUrl: 'https://images.unsplash.com/photo-1466781783364-36c955e42a7f?w=800&auto=format&fit=crop' }
     ],
-    footer: '짤 2024 Project Cyclical. Open Sustainable Design.',
     handmade: 'Handmade',
     isAi: 'AI Generated'
   }
@@ -125,13 +129,42 @@ const TRANSLATIONS = {
 type ViewMode = 'default' | '3d' | 'blueprint';
 
 const ProjectDetail: React.FC<ProjectDetailProps> = ({
-  onBack, onOpenWorkspace, language, project, user, onLoginClick, onNavigate, onLikeToggle, onViewIncrement, likedProjects,
-  userTokens, onDeductTokens
+  onBack, onEdit, onAnalyze, language, project, user, onLoginClick, onNavigate, onLikeToggle, onViewIncrement, likedProjects,
+  userTokens, onDeductTokens, onMessageClick, isOwner, isSuperAdmin, onViewProfile, onStatusChange
 }) => {
   const t = TRANSLATIONS[language];
   const [viewMode, setViewMode] = useState<ViewMode>('default');
   const [showFileList, setShowFileList] = useState(false);
   const [syncedMetadata, setSyncedMetadata] = useState<any>(null); // State for fresh metadata
+  
+  // Access Control States
+  const [hasGuideAccess, setHasGuideAccess] = useState<boolean>(false); // Strictly for step-by-step guide
+  const [hasDetailedAccess, setHasDetailedAccess] = useState<boolean>(false); // For blueprint_detailed / main blueprint
+  const [hasMechanicalAccess, setHasMechanicalAccess] = useState<boolean>(false); // For blueprint_mechanical
+  const [has3DAccess, setHas3DAccess] = useState<boolean>(false); // For 3D viewer
+  const [isProjectOwner, setIsProjectOwner] = useState<boolean>(false);
+
+  const hasTechnicalAccess = hasDetailedAccess || hasMechanicalAccess || has3DAccess || isProjectOwner;
+
+  // --- Strict Access Synchronization (Base & Realtime) ---
+  useEffect(() => {
+    const userId = user?.id;
+    const ownerId = project?.ownerId;
+    const adminMode = !!isSuperAdmin;
+    
+    const calculatedIsOwner = !!(userId && ownerId && String(userId).trim() === String(ownerId).trim());
+    setIsProjectOwner(calculatedIsOwner);
+
+    // Initial guide access (Owner/Admin only)
+    setHasGuideAccess(calculatedIsOwner || adminMode);
+    
+    // Initial technical access (Owner/Admin or inherited from props)
+    if (calculatedIsOwner || adminMode) {
+        setHasDetailedAccess(true);
+        setHasMechanicalAccess(true);
+        setHas3DAccess(true);
+    }
+  }, [user?.id, project?.ownerId, isSuperAdmin]);
 
   // --- AI Copilot State ---
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
@@ -164,6 +197,20 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const [editImageTarget, setEditImageTarget] = useState<'concept' | 'blueprint' | 'detailed' | 'mechanical' | null>(null);
   const [editConceptIdx, setEditConceptIdx] = useState<number>(0);
 
+  // --- Cancellation & Refund Logic ---
+  const handleCancelGeneration = (type: 'detailed' | 'mechanical' | '3d') => {
+    const cost = type === '3d' ? 30 : 5;
+    
+    if (type === '3d') {
+      setGenerating3D(false);
+    } else {
+      setGeneratingBlueprint(null);
+    }
+
+    onDeductTokens(-cost); // Refund
+    showToast(language === 'ko' ? `${cost} 토큰이 반환되었습니다.` : `${cost} tokens refunded.`, 'success');
+  };
+
   const showToast = (message: string, type: 'info' | 'success' | 'error' = 'info', duration = 4000) => {
     setToastMessage({ show: true, message, type });
     setTimeout(() => {
@@ -190,28 +237,61 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const handleSaveEdit = async () => {
     if (!project?.id || !user) return;
     setIsSavingEdit(true);
+    showToast(language === 'ko' ? '저장 중...' : 'Saving...', 'info');
+
     try {
       const currentMeta = syncedMetadata || (project as any)?.metadata || {};
+
+      // --- CRITICAL FIX: Ensure no large base64 data strings are saved to Supabase metadata ---
+      const uploadIfBase64 = async (url: string | undefined, folder: string): Promise<string> => {
+        if (url && url.startsWith('data:image')) {
+          try {
+            const blob = base64ToBlob(url, 'image/png');
+            return await uploadToR2(blob, folder);
+          } catch (e) {
+            console.error(`Failed to offload base64 image to R2 in ${folder}:`, e);
+            return url; // Fallback to base64 if R2 fails
+          }
+        }
+        return url || '';
+      };
+
+      // Process all potential base64 images in parallel
+      const [
+        cleanBlueprint,
+        cleanDetailed,
+        cleanMechanical,
+        ...cleanConceptImages
+      ] = await Promise.all([
+        uploadIfBase64(editImages.blueprintUrl, 'blueprints'),
+        uploadIfBase64(editImages.detailed, 'blueprints'),
+        uploadIfBase64(editImages.mechanical, 'blueprints'),
+        ...editImages.conceptImages.map(img => uploadIfBase64(img, 'ai-generated'))
+      ]);
+
       const newMeta = {
         ...currentMeta,
         description: editDescription,
         fabrication_guide: editSteps,
-        blueprint_url: editImages.blueprintUrl,
-        images: editImages.conceptImages,
+        blueprint_url: cleanBlueprint,
+        images: cleanConceptImages,
         additional_blueprints: {
           ...(currentMeta.additional_blueprints || {}),
-          detailed: editImages.detailed,
-          mechanical: editImages.mechanical,
+          detailed: cleanDetailed,
+          mechanical: cleanMechanical,
         },
       };
+
       const { error } = await supabase.from('items').update({
         title: editTitle,
-        image_url: editImages.conceptImages[0] || project.image,
+        image_url: cleanConceptImages[0] || project.image,
         metadata: newMeta,
       }).eq('id', project.id);
+
       if (error) throw error;
+
       setSyncedMetadata(newMeta);
-      setAdditionalBlueprints({ detailed: editImages.detailed, mechanical: editImages.mechanical });
+      setAdditionalBlueprints({ detailed: cleanDetailed, mechanical: cleanMechanical });
       setIsEditMode(false);
       showToast(language === 'ko' ? '수정 내용이 저장되었습니다!' : 'Changes saved!', 'success');
     } catch (e) {
@@ -255,7 +335,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
 
     try {
       // 1. Analyze Intent
-      const analysis = await aiService.analyzeCopilotIntent(msg, currentRecipe as any);
+      const analysis = await aiService.analyzeCopilotIntent(
+        msg, 
+        currentRecipe as any, 
+        [], 
+        null, 
+        user?.user_metadata?.nickname || 'User', 
+        null, 
+        hasDetailedAccess
+      );
       console.log("Copilot Intent:", analysis);
 
       // 2. Handle Actions
@@ -301,6 +389,35 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   };
 
 
+  const handleTogglePublic = async () => {
+    if (!project?.id || !user || !isOwner) return;
+    
+    const newPublicStatus = !project.isPublic;
+    showToast(newPublicStatus ? (language === 'ko' ? '공개로 전환 중...' : 'Publishing...') : (language === 'ko' ? '비공개로 전환 중...' : 'Setting to private...'), 'info');
+    
+    try {
+      const { error } = await supabase
+        .from('items')
+        .update({ is_public: newPublicStatus })
+        .eq('id', project.id);
+
+      if (error) throw error;
+      
+      // Update local project object (Note: project object here might be read-only from props, 
+      // but we update the synced state if necessary or let parent handle it via fetch)
+      project.isPublic = newPublicStatus;
+      showToast(newPublicStatus ? (language === 'ko' ? '공개되었습니다!' : 'Published!') : (language === 'ko' ? '비공개 처리되었습니다.' : 'Set to private.'), 'success');
+      
+      if (onStatusChange) onStatusChange();
+      
+      // Force re-render or let parent know (if needed, but for now simple local update)
+      setSyncedMetadata(prev => ({ ...prev })); 
+    } catch (err) {
+      console.error("Failed to toggle public status", err);
+      showToast(language === 'ko' ? '상태 변경 실패' : 'Toggle failed', 'error');
+    }
+  };
+
   // Increment view count when project is loaded AND fetch latest metadata
   useEffect(() => {
     if (project?.id) {
@@ -331,13 +448,42 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                 }
               }
 
-              // Access Control: Only Owner can see additional blueprints
-              const isOwner = user?.id === data.owner_id;
+              // Access Control: Owner or Granted User
+              const currentIsOwner = !!(user?.id && data.owner_id && user.id === data.owner_id);
+              let dbHasDetailed = false;
+              let dbHasMechanical = false;
+              let dbHas3D = false;
 
-              if (isOwner && data.metadata?.additional_blueprints) {
+              if (!currentIsOwner && !isSuperAdmin && user?.id) {
+                try {
+                  const { data: grantData } = await supabase
+                    .from('blueprint_access_grants')
+                    .select('access_type')
+                    .eq('project_id', project.id)
+                    .eq('user_id', user.id);
+                  if (grantData && grantData.length > 0) {
+                      dbHasDetailed = grantData.some(g => g.access_type === 'blueprint_detailed' || g.access_type === 'blueprint');
+                      dbHasMechanical = grantData.some(g => g.access_type === 'blueprint_mechanical' || g.access_type === 'blueprint');
+                      dbHas3D = grantData.some(g => g.access_type === '3d_model');
+                  }
+                } catch (err) {
+                   console.error("Access verification failed", err);
+                }
+              }
+              const finalDetailed = currentIsOwner || !!isSuperAdmin || dbHasDetailed;
+              const finalMechanical = currentIsOwner || !!isSuperAdmin || dbHasMechanical;
+              const final3D = currentIsOwner || !!isSuperAdmin || dbHas3D;
+              const finalGuide = currentIsOwner || !!isSuperAdmin; 
+
+              setHasDetailedAccess(finalDetailed);
+              setHasMechanicalAccess(finalMechanical);
+              setHas3DAccess(final3D);
+              setHasGuideAccess(finalGuide);
+
+              if ((finalDetailed || finalMechanical) && data.metadata?.additional_blueprints) {
                 setAdditionalBlueprints(data.metadata.additional_blueprints);
               } else {
-                setAdditionalBlueprints({}); // Hide if not owner
+                setAdditionalBlueprints({});
               }
             }
           }
@@ -401,10 +547,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     const folder = zip.folder("images");
 
     // Add dynamically generated blueprints too
-    const imageUrls = [...displayImages, ...Object.values(additionalBlueprints)];
+    const imageUrls = [...displayImages, ...Object.values(additionalBlueprints)].filter(isImageUrl);
 
     // Add images to zip
-    await Promise.all(imageUrls.map(async (url, index) => {
+    await Promise.all(imageUrls.map(async (url: string, index: number) => {
       try {
         let response;
         try {
@@ -420,8 +566,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
         // Determine name
         let name = `image_${index + 1}.png`;
         if (url === blueprintUrl) name = `blueprint_production.png`;
-        if (url === additionalBlueprints.detailed) name = `blueprint_detailed.png`;
-        if (url === additionalBlueprints.mechanical) name = `blueprint_mechanical.png`;
+        if (url === (additionalBlueprints as any).detailed) name = `blueprint_detailed.png`;
+        if (url === (additionalBlueprints as any).mechanical) name = `blueprint_mechanical.png`;
 
         folder?.file(name, blob);
       } catch (e) {
@@ -443,17 +589,36 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   };
 
   const handleConnectMaker = () => {
-    if (project?.isAiRemix || project?.isAiIdea) {
-      onOpenWorkspace();
+    if (!user) {
+      onLoginClick('detail');
       return;
     }
 
-    if (user) {
-      // User is logged in, go to workspace
-      onNavigate('workspace');
-    } else {
-      // User not logged in, show auth modal then go to workspace
-      onLoginClick('workspace');
+    if (isAiProject) {
+      onAnalyze();
+      return;
+    }
+
+    if (onMessageClick && project) {
+      const maker = {
+        name: project.maker,
+        avatar: project.makerAvatarUrl || '',
+        userId: project.ownerId || '',
+        projects: 0,
+        likes: '',
+        rawLikes: 0,
+      };
+      
+      // If the owner is the current user themselves
+      if (user.id === project.ownerId) {
+        alert(language === 'ko' ? '자신의 프로젝트입니다.' : 'This is your own project.');
+        return;
+      }
+
+      onMessageClick(maker, undefined, { 
+        relatedProjectId: project.id, 
+        relatedProjectTitle: project.title 
+      });
     }
   };
 
@@ -465,14 +630,61 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   // Get Blueprint URL - Use synced data if available
   const blueprintUrl = syncedMetadata?.blueprint_url || (project as any)?.metadata?.blueprint_url;
 
-  // Update displayImages to include blueprint if available
-  const notebookImages = syncedMetadata?.images || project?.images || [displayImage];
-  const displayImages = blueprintUrl && !notebookImages.includes(blueprintUrl)
-    ? [...notebookImages, blueprintUrl]
-    : notebookImages;
+  // Helper to check if a URL is an image (Blacklist non-image binaries)
+  const isImageUrl = (url: any): url is string => {
+    if (!url || typeof url !== 'string') return false;
+    if (url.startsWith('data:image')) return true;
+    
+    const clean = url.split('?')[0].toLowerCase();
+    
+    // Core binary types that are NEVER images
+    const isAlwaysBinary = clean.endsWith('.glb') || clean.endsWith('.stl') || clean.endsWith('.gltf') || clean.endsWith('.zip') || clean.endsWith('.obj') || clean.endsWith('.fbx');
+    if (isAlwaysBinary) return false;
+
+    // Handle .bin files: 
+    // - If in "models" folder, it's a 3D model (reject)
+    // - If in "ai-generated" folder, it's likely a misnamed image (allow for legacy)
+    if (clean.endsWith('.bin')) {
+      if (clean.includes('/models/')) return false;
+      if (clean.includes('/ai-generated/')) return true;
+      return false; // Default to reject other .bin
+    }
+
+    return true; // Assume other URLs (jpg, png, etc) are images
+  };
+
+  // Collect ALL potential image sources into a cumulative pool safely
+  const getSafeImageArray = (input: any): string[] => {
+    if (!input) return [];
+    if (Array.isArray(input)) return input.filter(item => typeof item === 'string');
+    if (typeof input === 'string') return [input];
+    return [];
+  };
+
+  const assetPool = [
+    displayImage,
+    ...(hasDetailedAccess ? [
+      blueprintUrl,
+      ...getSafeImageArray(syncedMetadata?.images),
+      ...getSafeImageArray(project?.images)
+    ] : [])
+  ].filter(isImageUrl);
+
+  // Deduplicate the pool and use as displayImages
+  const displayImages = Array.from(new Set(assetPool));
+  
+  // For compatibility with parts and generation logic that expects "notebook images" (excluding the primary blueprint)
+  const notebookImages = displayImages.filter(url => url !== blueprintUrl);
 
   const displayCategory = project?.category || t.printing;
-  const displayTime = project?.time || '4h 20m';
+  
+  // Helper to remove "(including 3D printing time)" etc.
+  const cleanTime = (time: string) => {
+    if (!time) return '';
+    return time.replace(/\s?\(.*(printing|프린팅).*\)/i, '').trim();
+  };
+
+  const displayTime = cleanTime(project?.time || '4h 20m');
   const displayDifficulty = project?.difficulty || 'Medium';
 
   // Check if project is AI generated
@@ -501,7 +713,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     return model3DFile?.url || null;
   };
 
-  const model3DUrl = getModel3DUrl();
+  const model3DUrl = hasTechnicalAccess ? getModel3DUrl() : null;
 
   // Logic for fabrication steps
   // If the project has custom steps, use them. Otherwise use the default steps from translation.
@@ -526,7 +738,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   // NOTE: displayImages tracks "Base" images. 
   // We will handle the "view" logic slightly differently: currentDisplayImage is computed including additionalBlueprints
 
-  const additionalBlueprintList = [additionalBlueprints.detailed, additionalBlueprints.mechanical].filter(Boolean) as string[];
+  const additionalBlueprintList = (hasDetailedAccess ? [additionalBlueprints.detailed, additionalBlueprints.mechanical] : []).filter(Boolean) as string[];
   const allViewableImages = [...displayImages, ...additionalBlueprintList];
 
   const currentDisplayImage = allViewableImages[selectedImageIndex] || displayImage;
@@ -553,14 +765,31 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
 
     try {
       // Use the Concept Image (displayImages[0] usually) as the Anchor
-      // Wait, displayImages[0] might be the final render. Ideally we use the "Concept" image.
-      // For now, using the main project image as reference is safe.
-      const anchorImage = displayImages[0] || displayImage;
+      // Filter out any potential non-images just in case
+      const anchorImage = displayImages.find(isImageUrl) || (isImageUrl(displayImage) ? displayImage : null);
+
+      if (!anchorImage) {
+        throw new Error(language === 'ko' ? '도면 생성을 위한 참조 이미지를 찾을 수 없습니다.' : 'Could not find a reference image for blueprint generation.');
+      }
+
+      console.log("Generating Blueprint - Anchor Image:", anchorImage);
 
       // Context: Use current recipe or description
       const context = currentRecipe;
 
-      const bp = await aiService.generateBlueprintImage(context, anchorImage, type);
+      let bp = await aiService.generateBlueprintImage(context, anchorImage, type);
+
+      // --- CRITICAL FIX: Upload base64 to R2 to avoid large Supabase payload ---
+      if (bp && bp.startsWith('data:image')) {
+        try {
+          const blob = base64ToBlob(bp, 'image/png');
+          bp = await uploadToR2(blob, 'blueprints');
+          console.log("Newly generated blueprint uploaded to R2:", bp);
+        } catch (uploadErr) {
+          console.error("R2 Upload failed for blueprint, using base64 fallback", uploadErr);
+          // Continue with base64 if upload fails, though this might cause the fetch error again
+        }
+      }
 
       const newBlueprints = { ...additionalBlueprints, [type]: bp };
       setAdditionalBlueprints(newBlueprints);
@@ -774,28 +1003,73 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
       )}
 
       {/* PIP 3D Viewer for Copilot */}
-      {(isCopilotOpen && model3DUrl) && (
-        <div className="fixed bottom-6 left-6 w-80 h-80 bg-[#111] rounded-2xl shadow-2xl border border-gray-700/50 overflow-hidden z-[70] animate-fade-in-up">
-          <div className="absolute top-0 left-0 right-0 p-2 bg-gradient-to-b from-black/60 to-transparent z-10 flex justify-between items-center opacity-0 hover:opacity-100 transition-opacity">
-             <span className="text-white text-xs font-semibold px-2 flex items-center gap-1">
-               <span className="material-icons-round text-sm text-primary">auto_awesome</span>
-               AI Preview
+      {isCopilotOpen && (
+        <div className="fixed bottom-6 left-6 w-80 h-80 bg-[#111] rounded-2xl shadow-2xl border border-gray-700/50 overflow-hidden z-[70] animate-fade-in-up group">
+          <div className="absolute top-0 left-0 right-0 p-3 bg-gradient-to-b from-black/80 to-transparent z-10 flex justify-between items-center opacity-100 transition-opacity">
+             <span className="text-white text-[10px] uppercase tracking-wider font-bold px-2 flex items-center gap-2">
+               <span className="material-icons-round text-primary text-sm animate-pulse">auto_awesome</span>
+               {model3DUrl ? 'AI 3D Preview' : 'Design Reference'}
              </span>
           </div>
-          <ErrorBoundary
-            fallback={
-              <div className="w-full h-full flex flex-col items-center justify-center bg-[#111] text-white/50 space-y-2">
-                <span className="material-icons-round text-2xl">broken_image</span>
-                <span className="text-xs">미리보기 오류</span>
-              </div>
-            }
-          >
-            <ThreeDViewer ref={viewerRef} modelUrl={model3DUrl} className="w-full h-full cursor-grab active:cursor-grabbing" />
-          </ErrorBoundary>
+          {model3DUrl ? (
+            <ErrorBoundary
+              fallback={
+                <div className="w-full h-full flex flex-col items-center justify-center bg-[#111] text-white/50 space-y-2">
+                  <span className="material-icons-round text-2xl">broken_image</span>
+                  <span className="text-xs">미리보기 오류</span>
+                </div>
+              }
+            >
+              <ThreeDViewer ref={viewerRef} modelUrl={model3DUrl} className="w-full h-full cursor-grab active:cursor-grabbing" />
+            </ErrorBoundary>
+          ) : (
+             <div className="w-full h-full relative group">
+                <img src={displayImage} alt="Reference" className="w-full h-full object-cover opacity-60 transition-transform duration-700 group-hover:scale-110" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                   <div className="bg-black/40 backdrop-blur-md border border-white/10 px-4 py-2 rounded-xl text-white/70 text-[10px] uppercase font-bold tracking-widest">
+                      3D Model Unavailable
+                   </div>
+                </div>
+             </div>
+          )}
         </div>
       )}
 
       <div className="max-w-7xl mx-auto py-6 lg:py-12 px-4 sm:px-6 lg:px-0 relative">
+        {/* Floating Action Buttons aligned with content container (Sticky) */}
+        <div className="sticky top-[calc(100vh-60px)] w-full h-0 z-40 pointer-events-none">
+          <div className="relative w-full h-14">
+            {/* AI Pilot Button (Right) */}
+            {(project?.isAiRemix || project?.isAiIdea) && (
+              <button
+                onClick={() => {
+                  if (!user) {
+                    onLoginClick('detail');
+                  } else {
+                    onAnalyze();
+                  }
+                }}
+                className="absolute right-6 lg:right-0 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110 pointer-events-auto animate-bounce-slow"
+                aria-label="Open AI Workspace"
+              >
+                <span className="material-icons-round text-2xl">smart_toy</span>
+              </button>
+            )}
+
+            {/* Edit Button (Left) */}
+            {user && project?.ownerId && user.id === project.ownerId && !isEditMode && (
+              <button
+                onClick={enterEditMode}
+                className="absolute left-6 lg:left-0 w-14 h-14 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110 pointer-events-auto"
+                title={language === 'ko' ? '제작가이드 수정' : 'Edit'}
+              >
+                <span className="material-icons-round text-2xl">edit</span>
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Copilot Panel Integration */}
         {isCopilotOpen && (
           <CopilotPanel
@@ -893,6 +1167,26 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                     {t.handmade}
                   </span>
                 )}
+
+                {/* --- NEW: Visibility Toggle for Owner --- */}
+                {isOwner && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleTogglePublic(); }}
+                    className={`px-3 py-1 backdrop-blur-md rounded-full text-xs font-bold flex items-center gap-1.5 shadow-md border transition-all hover:scale-105 active:scale-95
+                      ${project?.isPublic 
+                        ? 'bg-green-500/90 text-white border-green-400' 
+                        : 'bg-gray-800/90 text-white border-gray-600'}
+                    `}
+                    title={project?.isPublic ? (language === 'ko' ? '비공개로 전환' : 'Make Private') : (language === 'ko' ? '커뮤니티에 공개' : 'Make Public')}
+                  >
+                    <span className="material-icons-round text-sm">
+                      {project?.isPublic ? 'public' : 'lock'}
+                    </span>
+                    {project?.isPublic 
+                      ? (language === 'ko' ? '공개 중' : 'Public') 
+                      : (language === 'ko' ? '비공개' : 'Private')}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -944,8 +1238,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                   </div>
                 ))}
 
-                {/* 2. Detailed Blueprint (Locked or Viewed) - Only show if Owner */}
-                {(user && user.id === project?.ownerId) && (
+                {/* 2. Detailed Blueprint */}
+                {(user && (user.id === project?.ownerId || hasDetailedAccess)) ? (
                   additionalBlueprints.detailed || (isEditMode && editImages.detailed) ? (
                     <div className="relative w-24 h-24 flex-shrink-0">
                       <button
@@ -978,29 +1272,63 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                       )}
                     </div>
                   ) : (
-                    <button
-                      onClick={() => handleGenerateAdditionalBlueprint('detailed')}
-                      disabled={!!generatingBlueprint}
-                      className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition group"
-                    >
-                      {generatingBlueprint === 'detailed' ? (
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    (user.id === project?.ownerId) && (
+                      generatingBlueprint === 'detailed' ? (
+                        <div className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 transition group">
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                            <button 
+                              onClick={() => handleCancelGeneration('detailed')}
+                              className="text-[10px] text-red-500 font-bold hover:underline"
+                            >
+                              {language === 'ko' ? '취소' : 'Cancel'}
+                            </button>
+                          </div>
+                        </div>
                       ) : (
-                        <>
+                        <button
+                          onClick={() => handleGenerateAdditionalBlueprint('detailed')}
+                          disabled={!!generatingBlueprint}
+                          className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition group"
+                        >
                           <span className="material-icons-round text-gray-500 mb-1 group-hover:text-primary transition-colors text-xl">lock</span>
                           <span className="text-xs text-gray-700 dark:text-gray-300 font-bold mb-0.5">상세도</span>
                           <span className="text-[10px] text-white bg-primary px-1.5 py-0.5 rounded-full font-black shadow-sm flex items-center gap-0.5">
                             <span className="material-icons-round text-[12px]">recycling</span>
                             5 Token
                           </span>
-                        </>
-                      )}
+                        </button>
+                      )
+                    )
+                  )
+                ) : (
+                  (user && user.id !== project?.ownerId && !hasDetailedAccess && (syncedMetadata?.additional_blueprints?.detailed || (project as any)?.metadata?.additional_blueprints?.detailed)) && (
+                    <button
+                      onClick={() => {
+                          if (onMessageClick && project) {
+                              const maker = {
+                                  name: project.maker,
+                                  avatar: project.makerAvatarUrl || '',
+                                  userId: project.ownerId || '',
+                                  projects: 0,
+                                  likes: '',
+                                  rawLikes: 0,
+                              };
+                              const templateText = `[도면 요청] 안녕하세요! "${project.title}" 프로젝트의 상세도 도면 접근 권한을 요청합니다.`;
+                              onMessageClick(maker, templateText, { relatedProjectId: project.id, relatedProjectTitle: project.title, accessType: 'blueprint_detailed' });
+                          }
+                      }}
+                      className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition group"
+                      title={language === 'ko' ? '제작자에게 상세도 도면 요청하기' : 'Request Detailed Blueprint from Maker'}
+                    >
+                      <span className="material-icons-round text-gray-500 mb-1 group-hover:text-primary transition-colors text-xl">lock</span>
+                      <span className="text-[11px] text-gray-700 dark:text-gray-300 font-bold mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis w-[90%] text-center">도면요청(상세도)</span>
                     </button>
                   )
                 )}
 
-                {/* 3. Mechanical Blueprint (Locked or Viewed) - Only show if Owner */}
-                {(user && user.id === project?.ownerId) && (
+                {/* 3. Mechanical Blueprint */}
+                {(user && (user.id === project?.ownerId || hasMechanicalAccess)) ? (
                   additionalBlueprints.mechanical || (isEditMode && editImages.mechanical) ? (
                     <div className="relative w-24 h-24 flex-shrink-0">
                       <button
@@ -1033,29 +1361,63 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                       )}
                     </div>
                   ) : (
-                    <button
-                      onClick={() => handleGenerateAdditionalBlueprint('mechanical')}
-                      disabled={!!generatingBlueprint}
-                      className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition group"
-                    >
-                      {generatingBlueprint === 'mechanical' ? (
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    (user.id === project?.ownerId) && (
+                      generatingBlueprint === 'mechanical' ? (
+                        <div className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 transition group">
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                            <button 
+                              onClick={() => handleCancelGeneration('mechanical')}
+                              className="text-[10px] text-red-500 font-bold hover:underline"
+                            >
+                              {language === 'ko' ? '취소' : 'Cancel'}
+                            </button>
+                          </div>
+                        </div>
                       ) : (
-                        <>
+                        <button
+                          onClick={() => handleGenerateAdditionalBlueprint('mechanical')}
+                          disabled={!!generatingBlueprint}
+                          className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition group"
+                        >
                           <span className="material-icons-round text-gray-500 mb-1 group-hover:text-primary transition-colors text-xl">lock</span>
                           <span className="text-xs text-gray-700 dark:text-gray-300 font-bold mb-0.5">조립가이드</span>
                           <span className="text-[10px] text-white bg-primary px-1.5 py-0.5 rounded-full font-black shadow-sm flex items-center gap-0.5">
                             <span className="material-icons-round text-[12px]">recycling</span>
                             5 Token
                           </span>
-                        </>
-                      )}
+                        </button>
+                      )
+                    )
+                  )
+                ) : (
+                  (user && user.id !== project?.ownerId && !hasMechanicalAccess && (syncedMetadata?.additional_blueprints?.mechanical || (project as any)?.metadata?.additional_blueprints?.mechanical)) && (
+                    <button
+                      onClick={() => {
+                          if (onMessageClick && project) {
+                              const maker = {
+                                  name: project.maker,
+                                  avatar: project.makerAvatarUrl || '',
+                                  userId: project.ownerId || '',
+                                  projects: 0,
+                                  likes: '',
+                                  rawLikes: 0,
+                              };
+                              const templateText = `[도면 요청] 안녕하세요! "${project.title}" 프로젝트의 조립 가이드 도면 접근 권한을 요청합니다.`;
+                              onMessageClick(maker, templateText, { relatedProjectId: project.id, relatedProjectTitle: project.title, accessType: 'blueprint_mechanical' });
+                          }
+                      }}
+                      className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition group"
+                      title={language === 'ko' ? '제작자에게 조립 가이드 도면 요청하기' : 'Request Mechanical Blueprint from Maker'}
+                    >
+                      <span className="material-icons-round text-gray-500 mb-1 group-hover:text-primary transition-colors text-xl">lock</span>
+                      <span className="text-[11px] text-gray-700 dark:text-gray-300 font-bold mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis w-[90%] text-center">도면요청(조립 가이드)</span>
                     </button>
                   )
                 )}
 
                 {/* 3D 뷰어 썸네일 */}
-                {model3DUrl && (
+                {model3DUrl && (has3DAccess || user?.id === project?.ownerId) && (
                   <button
                     onClick={() => handleToolClick('3d')}
                     className={`relative w-24 h-24 rounded-xl overflow-hidden border transition-all flex-shrink-0 flex items-center justify-center hover:scale-105 cursor-pointer
@@ -1068,7 +1430,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               </div>
               <div className="flex items-center space-x-3 w-full sm:w-auto">
                 {/* 3D View / Generate Button */}
-                {model3DUrl ? (
+                {model3DUrl && (has3DAccess || user?.id === project?.ownerId) ? (
                   <button onClick={() => handleToolClick('3d')} className={`flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-3 rounded-xl border transition-colors text-sm font-semibold shadow-sm 
                         ${viewMode === '3d'
                       ? 'bg-gray-900 text-white border-transparent'
@@ -1079,19 +1441,57 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                     <span>{t.view3DButton}</span>
                   </button>
                 ) : (
-                  (user && user.id === project?.ownerId) && (
+                  model3DUrl && user && user.id !== project?.ownerId && !has3DAccess ? (
                     <button
-                      onClick={handleGenerate3DModel}
-                      disabled={generating3D}
-                      className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-3 rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors text-sm font-bold shadow-sm"
+                      onClick={() => {
+                          if (onMessageClick && project) {
+                              const maker = {
+                                  name: project.maker,
+                                  avatar: project.makerAvatarUrl || '',
+                                  userId: project.ownerId || '',
+                                  projects: 0,
+                                  likes: '',
+                                  rawLikes: 0,
+                              };
+                              const templateText = `[3D뷰어 요청] 안녕하세요! "${project.title}" 프로젝트의 3D 모델 접근 권한을 요청합니다.`;
+                              onMessageClick(maker, templateText, { relatedProjectId: project.id, relatedProjectTitle: project.title, accessType: '3d_model' });
+                          }
+                      }}
+                      className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm font-semibold shadow-sm"
                     >
-                      {generating3D ? (
-                        <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <span className="material-icons-round text-lg">recycling</span>
-                      )}
-                      <span>{language === 'ko' ? '3D 생성 (30T)' : 'Generate 3D (30T)'}</span>
+                      <span className="material-icons-round text-lg">lock</span>
+                      <span>{language === 'ko' ? '3D뷰어 요청' : 'Request 3D View'}</span>
                     </button>
+                  ) : (
+                    (user && user.id === project?.ownerId) ? (
+                      generating3D ? (
+                        <div className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-3 rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                            <div className="flex flex-col lg:flex-row items-center gap-2">
+                              <span className="text-xs font-bold text-green-700 dark:text-green-300">
+                                {language === 'ko' ? '3D 생성 중...' : 'Generating 3D...'}
+                              </span>
+                              <button 
+                                onClick={() => handleCancelGeneration('3d')}
+                                className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold shadow-sm transition-all"
+                              >
+                                {language === 'ko' ? '취소 및 환불' : 'Cancel & Refund'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleGenerate3DModel}
+                          disabled={generating3D}
+                          className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-3 rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors text-sm font-bold shadow-sm"
+                        >
+                          <span className="material-icons-round text-lg">recycling</span>
+                          <span>{language === 'ko' ? '3D 생성 (30T)' : 'Generate 3D (30T)'}</span>
+                        </button>
+                      )
+                    ) : null
                   )
                 )}
               </div>
@@ -1289,6 +1689,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                 {/* Advanced Download Dropdown */}
                 <div className="relative group z-30 w-full">
                   <button
+                    onClick={() => !user && onLoginClick('detail')}
                     className="w-full py-3.5 lg:py-4 px-6 bg-[#00ae42] hover:bg-[#009639] text-white rounded-xl font-bold shadow-lg transition-all flex items-center justify-center space-x-2 active:scale-95"
                   >
                     <span>다운로드</span>
@@ -1408,7 +1809,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
         </div >
 
         {/* Fabrication Guide */}
-        < div className="mt-24 max-w-5xl mx-auto px-6 lg:px-0" >
+        <div className="mt-24 max-w-5xl mx-auto px-6 lg:px-0">
           <h2 className="text-2xl font-bold mb-12 flex items-center space-x-3 text-gray-900 dark:text-white">
             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
               <span className="material-icons-round">build</span>
@@ -1416,119 +1817,116 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
             <span>{t.fabricationGuide}</span>
           </h2>
 
+          {(hasGuideAccess) ? (
+            <div className="relative">
+              <div className="absolute left-8 top-4 bottom-4 w-0.5 bg-gray-100 dark:bg-gray-800"></div>
 
-
-          <div className="relative">
-            <div className="absolute left-8 top-4 bottom-4 w-0.5 bg-gray-100 dark:bg-gray-800"></div>
-
-            {(isEditMode ? editSteps : displaySteps).map((step: any, idx: number) => (
-              <div key={idx} className="relative pl-24 pb-12 group last:pb-0">
-                <div className="absolute left-0 top-0 w-16 h-16 flex items-center justify-center bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-full z-10 shadow-sm group-hover:border-primary group-hover:shadow-lg group-hover:shadow-primary/20 transition-all duration-300">
-                  <span className="text-xl font-bold text-gray-300 group-hover:text-primary transition-colors">{idx + 1}</span>
-                </div>
-                <div>
-                  {isEditMode ? (
-                    <div className="space-y-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-2xl p-4">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-bold text-amber-600 uppercase tracking-wide">Step {idx + 1}</span>
-                        <button
-                          onClick={() => setEditSteps(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-400 hover:text-red-600 transition-colors"
-                          title="스텝 삭제"
-                        >
-                          <span className="material-icons-round text-sm">delete</span>
-                        </button>
+              {(isEditMode ? editSteps : displaySteps).map((step: any, idx: number) => (
+                <div key={idx} className="relative pl-24 pb-12 group last:pb-0">
+                  <div className="absolute left-0 top-0 w-16 h-16 flex items-center justify-center bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-full z-10 shadow-sm group-hover:border-primary group-hover:shadow-lg group-hover:shadow-primary/20 transition-all duration-300">
+                    <span className="text-xl font-bold text-gray-300 group-hover:text-primary transition-colors">{idx + 1}</span>
+                  </div>
+                  <div>
+                    {isEditMode ? (
+                      <div className="space-y-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-2xl p-4">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold text-amber-600 uppercase tracking-wide">Step {idx + 1}</span>
+                          <button
+                            onClick={() => setEditSteps(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-600 transition-colors"
+                            title="스텝 삭제"
+                          >
+                            <span className="material-icons-round text-sm">delete</span>
+                          </button>
+                        </div>
+                        <input
+                          value={step.title}
+                          onChange={e => setEditSteps(prev => prev.map((s, i) => i === idx ? { ...s, title: e.target.value } : s))}
+                          className="w-full text-lg font-bold bg-white dark:bg-gray-800 border border-amber-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-900 dark:text-white"
+                          placeholder="스텝 제목"
+                        />
+                        <textarea
+                          value={step.desc}
+                          onChange={e => setEditSteps(prev => prev.map((s, i) => i === idx ? { ...s, desc: e.target.value } : s))}
+                          rows={3}
+                          className="w-full text-sm bg-white dark:bg-gray-800 border border-amber-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-600 dark:text-gray-300 resize-none"
+                          placeholder="작업 설명"
+                        />
+                        <input
+                          value={step.tip || ''}
+                          onChange={e => setEditSteps(prev => prev.map((s, i) => i === idx ? { ...s, tip: e.target.value } : s))}
+                          className="w-full text-sm bg-white dark:bg-gray-800 border border-amber-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 text-yellow-700 dark:text-yellow-400"
+                          placeholder="팁 (선택사항)"
+                        />
                       </div>
-                      <input
-                        value={step.title}
-                        onChange={e => setEditSteps(prev => prev.map((s, i) => i === idx ? { ...s, title: e.target.value } : s))}
-                        className="w-full text-lg font-bold bg-white dark:bg-gray-800 border border-amber-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-900 dark:text-white"
-                        placeholder="스텝 제목"
-                      />
-                      <textarea
-                        value={step.desc}
-                        onChange={e => setEditSteps(prev => prev.map((s, i) => i === idx ? { ...s, desc: e.target.value } : s))}
-                        rows={3}
-                        className="w-full text-sm bg-white dark:bg-gray-800 border border-amber-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-600 dark:text-gray-300 resize-none"
-                        placeholder="작업 설명"
-                      />
-                      <input
-                        value={step.tip || ''}
-                        onChange={e => setEditSteps(prev => prev.map((s, i) => i === idx ? { ...s, tip: e.target.value } : s))}
-                        className="w-full text-sm bg-white dark:bg-gray-800 border border-amber-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 text-yellow-700 dark:text-yellow-400"
-                        placeholder="팁 (선택사항)"
-                      />
-                    </div>
-                  ) : (
-                    <>
-                      <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white">{step.title}</h3>
-                      <p className="text-gray-500 dark:text-gray-400 leading-relaxed mb-4">{step.desc}</p>
-                      {(step as any).imageUrl && (
-                        <div className="mb-4 rounded-2xl overflow-hidden border border-gray-100 dark:border-gray-800 shadow-sm max-w-2xl group/stepimg relative bg-gray-50 dark:bg-gray-900">
-                          <img
-                            src={(step as any).imageUrl}
-                            alt={step.title}
-                            className="w-full h-auto object-contain transition-transform duration-500 hover:scale-105 cursor-zoom-in"
-                            onClick={() => setFullScreenImage((step as any).imageUrl)}
-                          />
-                          <div className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/stepimg:opacity-100 transition-opacity pointer-events-none">
-                            <span className="material-icons-round text-sm">fullscreen</span>
+                    ) : (
+                      <>
+                        <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white">{step.title}</h3>
+                        <p className="text-gray-500 dark:text-gray-400 leading-relaxed mb-4">{step.desc}</p>
+                        {(step as any).imageUrl && (
+                          <div className="mb-4 rounded-2xl overflow-hidden border border-gray-100 dark:border-gray-800 shadow-sm max-w-2xl group/stepimg relative bg-gray-50 dark:bg-gray-900">
+                            <img
+                              src={(step as any).imageUrl}
+                              alt={step.title}
+                              className="w-full h-auto object-contain transition-transform duration-500 hover:scale-105 cursor-zoom-in"
+                              onClick={() => setFullScreenImage((step as any).imageUrl)}
+                            />
+                            <div className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/stepimg:opacity-100 transition-opacity pointer-events-none">
+                              <span className="material-icons-round text-sm">fullscreen</span>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {step.tip && (
-                        <div className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm rounded-lg border border-blue-100 dark:border-blue-800 font-medium">
-                          <span className="material-icons-round text-sm">lightbulb</span>
-                          <span>Tip: {step.tip}</span>
-                        </div>
-                      )}
-                    </>
-                  )}
+                        )}
+                        {step.tip && (
+                          <div className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm rounded-lg border border-blue-100 dark:border-blue-800 font-medium">
+                            <span className="material-icons-round text-sm">lightbulb</span>
+                            <span>Tip: {step.tip}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
+              ))}
+
+              {/* Add Step button in edit mode */}
+              {isEditMode && (
+                <div className="pl-24 pt-4">
+                  <button
+                    onClick={() => setEditSteps(prev => [...prev, { title: '', desc: '', tip: '' }])}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-dashed border-amber-300 text-amber-600 hover:bg-amber-50 transition-colors text-sm font-bold"
+                  >
+                    <span className="material-icons-round text-sm">add</span>
+                    {language === 'ko' ? '스텝 추가' : 'Add Step'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-3xl p-12 border border-gray-100 dark:border-gray-700 flex flex-col items-center text-center">
+              <div className="w-20 h-20 rounded-full bg-white dark:bg-gray-800 shadow-xl flex items-center justify-center mb-6 border border-gray-50 dark:border-gray-700">
+                <span className="material-icons-round text-gray-300 text-4xl">lock</span>
               </div>
-            ))}
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                {language === 'ko' ? '제작가이드는 제작자 전용입니다.' : 'Fabrication guide is private.'}
+              </h3>
+              <p className="text-gray-500 dark:text-gray-400 max-w-sm leading-relaxed mb-8 text-sm">
+                {language === 'ko' 
+                  ? 'AI로 생성된 가이드의 정확성 확인 및 품질 관리를 위해 제작가이드는 제작자 본인에게만 제공됩니다.' 
+                  : 'Due to accuracy verification and quality control of AI-generated guides, this section is only available to the creator.'}
+              </p>
+              <button
+                onClick={handleConnectMaker}
+                className="px-6 py-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-gray-200 shadow-sm hover:shadow-md transition-all active:scale-95"
+              >
+                {language === 'ko' ? '제작자에게 문의하기' : 'Contact Maker'}
+              </button>
+            </div>
+          )}
+        </div>
 
-            {/* Add Step button in edit mode */}
-            {isEditMode && (
-              <div className="pl-24 pt-4">
-                <button
-                  onClick={() => setEditSteps(prev => [...prev, { title: '', desc: '', tip: '' }])}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-dashed border-amber-300 text-amber-600 hover:bg-amber-50 transition-colors text-sm font-bold"
-                >
-                  <span className="material-icons-round text-sm">add</span>
-                  {language === 'ko' ? '스텝 추가' : 'Add Step'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div >
-
-        {/* Floating Action Button for AI Copilot */}
-        {(project?.isAiRemix || project?.isAiIdea) && (
-          <button
-            onClick={onOpenWorkspace}
-            className="fixed bottom-8 right-8 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110 z-40 animate-bounce-slow"
-            aria-label="Open AI Workspace"
-          >
-            <span className="material-icons-round text-2xl">smart_toy</span>
-          </button>
-        )}
-
-        {/* Floating Edit Button for Owner */}
-        {user && project?.ownerId && user.id === project.ownerId && !isEditMode && (
-          <button
-            onClick={enterEditMode}
-            className="fixed bottom-8 left-8 w-14 h-14 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110 z-40"
-            title={language === 'ko' ? '제작가이드 수정' : 'Edit'}
-          >
-            <span className="material-icons-round text-2xl">edit</span>
-          </button>
-        )}
 
         {/* Footer simple */}
-        < footer className="mt-24 pt-12 border-t border-gray-200 dark:border-gray-800 flex flex-col items-center" >
-          <p className="text-gray-400 text-sm font-medium">{t.footer}</p>
-        </footer >
+        <footer className="mt-24 pb-12" />
       </div >
     </>
   );

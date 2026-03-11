@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 -- Row Level Security
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
--- Users can read their own profile
-CREATE POLICY "Users can view own profile" ON user_profiles
-  FOR SELECT USING (auth.uid() = user_id);
+-- Anyone can read any profile
+CREATE POLICY "Public profiles are viewable by everyone" ON user_profiles
+  FOR SELECT USING (true);
 
 -- Users can update their own profile
 CREATE POLICY "Users can update own profile" ON user_profiles

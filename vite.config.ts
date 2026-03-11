@@ -27,6 +27,14 @@ export default defineConfig(({ mode }) => {
           global: 'globalThis'
         }
       }
+    },
+    build: {
+      // Strip all console.log/warn/error calls from production bundles
+      minify: 'esbuild',
+      target: 'es2020',
+    },
+    esbuild: {
+      drop: ['console', 'debugger'],
     }
   };
 });

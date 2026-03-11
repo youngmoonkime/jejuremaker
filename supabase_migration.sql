@@ -15,11 +15,11 @@ CREATE TABLE IF NOT EXISTS user_tokens (
 CREATE TABLE IF NOT EXISTS user_tokens (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE NOT NULL,
-  tokens_remaining INTEGER NOT NULL DEFAULT 25,
+  tokens_remaining INTEGER NOT NULL DEFAULT 100,
   tokens_used INTEGER NOT NULL DEFAULT 0,
   signup_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   last_reset_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  next_reset_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '30 days'),
+  next_reset_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '1 day'),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -45,16 +45,15 @@ CREATE INDEX IF NOT EXISTS idx_items_public ON items(is_public);
 CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
 CREATE INDEX IF NOT EXISTS idx_items_scheduled_deletion ON items(scheduled_deletion_at) WHERE scheduled_deletion_at IS NOT NULL;
 
--- 3. Function to reset tokens every 30 days from signup
 CREATE OR REPLACE FUNCTION reset_user_tokens()
 RETURNS void AS $$
 BEGIN
   UPDATE user_tokens
   SET 
-    tokens_remaining = 25,
+    tokens_remaining = 100,
     tokens_used = 0,
     last_reset_at = NOW(),
-    next_reset_at = NOW() + INTERVAL '30 days',
+    next_reset_at = NOW() + INTERVAL '1 day',
     updated_at = NOW()
   WHERE next_reset_at <= NOW();
 END;
@@ -278,11 +277,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 --
 -- ============================================
 
-  tokens_remaining INTEGER NOT NULL DEFAULT 25,
+  tokens_remaining INTEGER NOT NULL DEFAULT 100,
   tokens_used INTEGER NOT NULL DEFAULT 0,
   signup_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   last_reset_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  next_reset_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '30 days'),
+  next_reset_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '1 day'),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -308,16 +307,15 @@ CREATE INDEX IF NOT EXISTS idx_items_public ON items(is_public);
 CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
 CREATE INDEX IF NOT EXISTS idx_items_scheduled_deletion ON items(scheduled_deletion_at) WHERE scheduled_deletion_at IS NOT NULL;
 
--- 3. Function to reset tokens every 30 days from signup
 CREATE OR REPLACE FUNCTION reset_user_tokens()
 RETURNS void AS $$
 BEGIN
   UPDATE user_tokens
   SET 
-    tokens_remaining = 25,
+    tokens_remaining = 100,
     tokens_used = 0,
     last_reset_at = NOW(),
-    next_reset_at = NOW() + INTERVAL '30 days',
+    next_reset_at = NOW() + INTERVAL '1 day',
     updated_at = NOW()
   WHERE next_reset_at <= NOW();
 END;

@@ -145,6 +145,45 @@ serve(async (req) => {
       );
     }
 
+    // 2. DELETE Path (Asset Cleanup)
+    if (req.method === "DELETE") {
+      const { keys } = await req.json();
+      if (!keys || !Array.isArray(keys) || keys.length === 0) {
+        return new Response(JSON.stringify({ error: "No keys provided" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Initialize S3 client for R2
+      const { S3Client, DeleteObjectsCommand } = await import(
+        "https://esm.sh/@aws-sdk/client-s3@3.370.0"
+      );
+
+      const s3Client = new S3Client({
+        region: "auto",
+        endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+        credentials: {
+          accessKeyId: R2_ACCESS_KEY_ID,
+          secretAccessKey: R2_SECRET_ACCESS_KEY,
+        },
+      });
+
+      const deleteParams = {
+        Bucket: R2_BUCKET_NAME,
+        Delete: {
+          Objects: keys.map((key) => ({ Key: key })),
+          Quiet: true,
+        },
+      };
+
+      await s3Client.send(new DeleteObjectsCommand(deleteParams));
+
+      return new Response(JSON.stringify({ success: true, count: keys.length }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const contentTypeHeader = (req.headers.get("content-type") || "")
       .toLowerCase();
 

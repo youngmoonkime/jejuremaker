@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Language } from '../App';
 import { Project, MaterialAnalysis, WizardStep } from '../types';
+import { Language } from '../contexts/ThemeContext';
 import {
     analyzeMaterial,
     generateConceptPrompts,
@@ -152,6 +152,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
             setImagePreview('');
             setMaterialAnalysis(null);
             setConceptImages([null, null, null, null]);
+            setSelectedConceptIdx(null);
             setBlueprintImages({ production: null, detailed: null, mechanical: null });
             setModel3dUrl(null);
             setIsLoading(false);
@@ -163,6 +164,8 @@ const WizardModal: React.FC<WizardModalProps> = ({
             setCustomStyleDesc("");
             setCustomRefImage(null);
             setBlueprintType('production');
+            setSelectedCategory(CATEGORIES[0].id);
+            setSelectedStyle(null);
         }
     }, [isOpen]);
 
@@ -216,6 +219,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
         setIsLoading(true);
         setStep('concepts');
         setConceptImages([null, null, null, null]);
+        setSelectedConceptIdx(null);
         addLog("디자인 컨셉을 생성하고 있습니다...");
 
         try {
@@ -422,6 +426,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                     materials_list: Array.isArray(safeGuide.materials) ? safeGuide.materials : [{ item: materialAnalysis?.material || 'Main Material', estimated_qty: '1' }]
                 },
                 is_ai_generated: true,
+                is_public: false, // Default to private for AI-generated projects
                 owner_id: user.id,
                 created_at: new Date().toISOString()
             };
@@ -720,7 +725,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                                         return (
                                         <div
                                             key={idx}
-                                            className="relative flex-shrink-0 w-[80vw] aspect-[3/4] rounded-[2rem] overflow-hidden snap-center shadow-xl transition-all duration-500 border-4 border-transparent hover:border-emerald-400 group bg-gray-100 dark:bg-gray-700"
+                                            className={`relative flex-shrink-0 w-[80vw] aspect-[3/4] rounded-[2rem] overflow-hidden snap-center shadow-xl transition-all duration-300 border-4 box-border group bg-gray-100 dark:bg-gray-700 ${selectedConceptIdx === idx ? 'border-emerald-500 shadow-emerald-500/20' : 'border-transparent hover:border-emerald-400'}`}
                                         >
                                             {img ? (
                                                 <>
@@ -756,7 +761,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                                         return (
                                         <div
                                             key={idx}
-                                            className={`group relative rounded-[2rem] overflow-hidden cursor-pointer shadow-lg hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-4 bg-white dark:bg-gray-800 aspect-[4/3] flex items-center justify-center ${selectedConceptIdx === idx ? 'border-emerald-500 ring-4 ring-emerald-500/20' : 'border-transparent hover:border-emerald-400'}`}
+                                            className={`group relative rounded-[2rem] overflow-hidden cursor-pointer shadow-lg hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-4 box-border bg-white dark:bg-gray-800 aspect-[4/3] flex items-center justify-center ${selectedConceptIdx === idx ? 'border-emerald-500 shadow-emerald-500/20' : 'border-transparent hover:border-emerald-400'}`}
                                         >
                                             {img ? (
                                                 <>

@@ -1,18 +1,26 @@
 import React, { useState } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 
+import { Language } from '../contexts/ThemeContext';
+
 interface AuthModalProps {
+  isOpen: boolean;
   supabase: SupabaseClient;
   onClose: () => void;
+  onSuccess?: () => void;
+  language: Language;
   currentView?: string;
   projectId?: string;
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({ supabase, onClose, currentView, projectId }) => {
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, supabase, onClose, onSuccess, language, currentView, projectId }) => {
   const [loading, setLoading] = useState(false);
+
+  if (!isOpen) return null;
 
   const handleGoogleLogin = async () => {
     try {
+      console.log("AuthModal: handleGoogleLogin initiated");
       setLoading(true);
       const redirectUrl = new URL(window.location.origin);
       if (currentView) {
@@ -22,14 +30,19 @@ const AuthModal: React.FC<AuthModalProps> = ({ supabase, onClose, currentView, p
         redirectUrl.searchParams.set('projectId', projectId);
       }
 
+      console.log("AuthModal: Redirecting to Google OAuth via Supabase...", redirectUrl.toString());
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl.toString(),
         }
       });
-      if (error) throw error;
+      if (error) {
+        console.error("AuthModal: signInWithOAuth error:", error);
+        throw error;
+      }
     } catch (error) {
+      console.error("AuthModal: Login process failed:", error);
       alert(`Google Login Error: ${error.message}`);
       setLoading(false);
     }
@@ -76,18 +89,34 @@ const AuthModal: React.FC<AuthModalProps> = ({ supabase, onClose, currentView, p
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full relative flex items-center justify-center gap-3 bg-white dark:bg-[#2c2c2e] hover:bg-gray-50 dark:hover:bg-[#3a3a3c] text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600 rounded-xl px-6 py-4 text-[15px] font-medium transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed shadow-sm group"
+            className="w-full relative flex items-center justify-center gap-3 bg-white dark:bg-[#131314] hover:bg-gray-50 dark:hover:bg-[#1e1e1f] text-gray-900 dark:text-white border border-gray-300 dark:border-[#444746] rounded-full px-6 py-3 text-[15px] font-medium transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed shadow-sm group"
           >
             {loading ? (
               <div className="size-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
             ) : (
               <>
-                <img
-                  alt=""
-                  className="w-5 h-5"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuCo1yGusJJnjp92uAj8CGS2QWRel_vxyk1pJccPfUr9EDya73mQc6rLvIuvlAwQcSQGTx2hQz0DVqNWwltktlQg5ZA4GDBEeZ6wfLDBDUbuvpO18-v0ZSlmhUurX9PLCq8alhwwgO7sOt7_yJP1HK201qlh1fUP6xQGlHoG2TueWST89GWlnnOlCAXKV2ZtCCUmVRF_0vgD1YN8FWVl0MHT5RkmPpoIVckqHB-VZ14IPQrzZMP1o_vdIVPNDXYbQ-4mwvc6O9kpUgY"
-                />
-                <span>Continue with Google</span>
+                <div className="bg-white p-1 rounded-full flex items-center justify-center">
+                  <svg width="18" height="18" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    />
+                    <path fill="none" d="M1 1h22v22H1z" />
+                  </svg>
+                </div>
+                <span className="font-semibold">{language === 'ko' ? 'Google 계정으로 로그인' : 'Sign in with Google'}</span>
               </>
             )}
           </button>
