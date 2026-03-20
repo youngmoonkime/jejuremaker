@@ -1,10 +1,7 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { User } from '@supabase/supabase-js';
 import Discovery from './components/Discovery';
-import ProjectDetail from './components/ProjectDetail';
 import Layout from './components/Layout';
-import AuthModal from './components/AuthModal';
-import PricingModal from './components/PricingModal';
 import { Project, Maker } from './types';
 import { supabase } from './services/supabase';
 
@@ -24,6 +21,9 @@ const Trending = React.lazy(() => import('./components/Trending'));
 const Community = React.lazy(() => import('./components/Community'));
 const RemakeLab = React.lazy(() => import('./components/RemakeLab'));
 const Profile = React.lazy(() => import('./components/Profile'));
+const ProjectDetail = React.lazy(() => import('./components/ProjectDetail'));
+const AuthModal = React.lazy(() => import('./components/AuthModal'));
+const PricingModal = React.lazy(() => import('./components/PricingModal'));
 
 // Loading fallback for lazy components
 const LazyFallback = () => (
@@ -462,6 +462,7 @@ const App: React.FC = () => {
     switch (currentView) {
       case 'detail':
         return selectedProject ? (
+          <Suspense fallback={<LazyFallback />}>
           <ProjectDetail
             project={selectedProject}
             onBack={() => {
@@ -499,7 +500,8 @@ const App: React.FC = () => {
             toggleDarkMode={toggleDarkMode}
             toggleLanguage={toggleLanguage}
           />
-        ) : <Discovery 
+          </Suspense>
+        ) : <Discovery
               onNavigate={setCurrentView}
               onProjectSelect={handleProjectSelect}
               isDarkMode={isDarkMode}
@@ -811,30 +813,32 @@ const App: React.FC = () => {
       </Layout>
 
       {/* Shared Modals & Toasts */}
-      <PricingModal
-        isOpen={showPricingModal}
-        onClose={() => setShowPricingModal(false)}
-        language={language}
-        userTokens={userTokens}
-        onPurchaseTokens={() => {}}
-        onSubscribe={() => {}}
-      />
-      <AuthModal 
-        isOpen={showAuthModal} 
-        supabase={supabase}
-        onClose={() => setShowAuthModal(false)}
-        onSuccess={() => {
-          setShowAuthModal(false);
-          refreshTokens();
-          refreshUserProfile();
-          if (authTargetView) {
-            setCurrentView(authTargetView);
-          }
-        }}
-        language={language}
-        currentView={currentView}
-        projectId={(selectedProject?.id || projectToEdit?.id)?.toString()}
-      />
+      <Suspense fallback={null}>
+        <PricingModal
+          isOpen={showPricingModal}
+          onClose={() => setShowPricingModal(false)}
+          language={language}
+          userTokens={userTokens}
+          onPurchaseTokens={() => {}}
+          onSubscribe={() => {}}
+        />
+        <AuthModal
+          isOpen={showAuthModal}
+          supabase={supabase}
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => {
+            setShowAuthModal(false);
+            refreshTokens();
+            refreshUserProfile();
+            if (authTargetView) {
+              setCurrentView(authTargetView);
+            }
+          }}
+          language={language}
+          currentView={currentView}
+          projectId={(selectedProject?.id || projectToEdit?.id)?.toString()}
+        />
+      </Suspense>
 
       {toastNotification && currentView !== 'workspace' && (
         <div className="fixed bottom-6 right-6 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-500">

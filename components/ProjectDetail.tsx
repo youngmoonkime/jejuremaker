@@ -9,8 +9,8 @@ import { config } from '../services/config';
 import { supabase } from '../services/supabase';
 import { uploadToR2 } from '../services/r2Storage';
 import * as aiService from '../services/aiService';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
+// jszip은 다운로드 시점에 동적 import (번들 최적화)
+// file-saver는 다운로드 시점에 동적 import (번들 최적화)
 
 // Helper: Base64 to Blob
 const base64ToBlob = (base64: string, mimeType: string) => {
@@ -537,6 +537,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     try {
       const response = await fetch(file.url);
       const blob = await response.blob();
+      const { saveAs } = await import('file-saver');
       saveAs(blob, file.name);
     } catch (e) {
       console.error("Download failed", e);
@@ -546,6 +547,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   };
 
   const downloadImagesAsZip = async () => {
+    const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
     const folder = zip.folder("images");
 
@@ -601,6 +603,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     }));
 
     const content = await zip.generateAsync({ type: "blob" });
+    const { saveAs } = await import('file-saver');
     saveAs(content, `${project?.title || 'project'}_images.zip`);
   };
 

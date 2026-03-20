@@ -32,6 +32,14 @@ export default defineConfig(({ mode }) => {
       // Strip all console.log/warn/error calls from production bundles
       minify: 'esbuild',
       target: 'es2020',
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-supabase': ['@supabase/supabase-js'],
+          },
+        },
+      },
     },
     esbuild: {
       drop: ['console', 'debugger'],

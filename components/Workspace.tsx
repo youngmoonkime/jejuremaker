@@ -15,8 +15,8 @@ import {
   X
 } from 'lucide-react';
 import ThreeDViewer, { ThreeDViewerHandle } from './ThreeDViewer';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
+// jszip은 다운로드 시점에 동적 import (번들 최적화)
+// file-saver는 다운로드 시점에 동적 import (번들 최적화)
 import { Project } from '../types';
 import { config } from '../services/config';
 import * as aiService from '../services/aiService';
@@ -771,6 +771,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
   const handleExport = async () => {
     try {
       setIsLoading(true);
+      const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       
       // 1. Create a markdown file summarizing the AI Copilot Journey
@@ -807,6 +808,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
       // 3. Generate ZIP and trigger download
       const content = await zip.generateAsync({ type: "blob" });
+      const { saveAs } = await import('file-saver');
       saveAs(content, `${project.title.replace(/\s+/g, '_')}_export.zip`);
 
     } catch (error) {
