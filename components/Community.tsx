@@ -6,6 +6,7 @@ import { supabase } from '../services/supabase';
 import { config } from '../services/config';
 import { Project, SocialPost } from '../types';
 import FeedComposer from './FeedComposer';
+import { useToast } from '../contexts/ToastContext';
 
 interface CommunityProps {
     onNavigate: (view: 'discovery' | 'detail' | 'workspace' | 'upload' | 'trending' | 'community') => void;
@@ -64,6 +65,7 @@ const TRANSLATIONS = {
 };
 
 const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLoginClick }) => {
+    const { showToast } = useToast();
     const t = TRANSLATIONS[language];
     const [feedItems, setFeedItems] = useState<SocialPost[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -261,7 +263,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
             if (error) {
                 console.error("Comment add failed", error);
-                alert("Failed to save comment.");
+                showToast("Failed to save comment.", 'error');
                 setFeedItems(feedItems); // Revert
             }
 
@@ -308,7 +310,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
         if (error) {
             console.error("Delete comment failed", error);
-            alert("Failed to delete comment.");
+            showToast("Failed to delete comment.", 'error');
             setFeedItems(feedItems); // Revert
         }
     };
@@ -343,7 +345,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
         if (error) {
             console.error("Update comment failed", error);
-            alert("Failed to update comment.");
+            showToast("Failed to update comment.", 'error');
             setFeedItems(feedItems); // Revert
         }
     };
@@ -384,7 +386,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
         if (error) {
             console.error("Delete failed", error);
-            alert("Failed to delete post.");
+            showToast("Failed to delete post.", 'error');
             setFeedItems(previousFeed); // Revert
         }
     };
@@ -421,7 +423,7 @@ const Community: React.FC<CommunityProps> = ({ onNavigate, language, user, onLog
 
         if (error) {
             console.error("Update failed", error);
-            alert(`Failed to update post: ${error.message || JSON.stringify(error)}`);
+            showToast(`Failed to update post: ${error.message || JSON.stringify(error)}`, 'error');
             setFeedItems(previousFeed); // Revert
         }
     };

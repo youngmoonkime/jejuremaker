@@ -447,7 +447,7 @@ const WizardModal: React.FC<WizardModalProps> = ({
                 difficulty: data.difficulty as 'Easy' | 'Medium' | 'Hard',
                 isAiRemix: data.is_ai_generated,
                 description: data.description,
-                steps: data.metadata?.guide?.steps || [],
+                steps: data.metadata?.fabrication_guide || data.metadata?.guide?.steps || [],
                 downloadUrl: data.metadata?.blueprint_url,
                 modelFiles: (data.metadata?.model_3d_url || data.metadata?.model_url)
                     ? [{ name: '3d_model.glb', type: 'glb', size: 0, url: (data.metadata?.model_3d_url || data.metadata?.model_url) }]

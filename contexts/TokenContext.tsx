@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { useAuth } from './AuthContext';
 
 interface TokenContextType {
   userTokens: number;
   updateUserTokens: (newTokenCount: number) => Promise<void>;
+  deductTokens: (delta: number) => Promise<void>; // delta: 양수=차감, 음수=환불
   refreshTokens: () => Promise<void>;
 }
 
@@ -14,6 +15,10 @@ export const TokenProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { user } = useAuth();
   const [userTokens, setUserTokens] = useState<number>(100);
   const isSuperAdmin = user?.id === '9f906164-adf7-4eef-b247-26bc3fca5024';
+
+  // 항상 최신 토큰 값을 가리키는 ref (클로저 스테일 문제 방지)
+  const userTokensRef = useRef<number>(100);
+  userTokensRef.current = userTokens;
 
   const fetchUserTokens = useCallback(async () => {
     if (!user) {
@@ -99,6 +104,7 @@ export const TokenProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateUserTokens = async (newTokenCount: number) => {
     if (!user) return;
 
+    userTokensRef.current = newTokenCount;
     setUserTokens(newTokenCount);
 
     try {
@@ -116,10 +122,32 @@ export const TokenProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  // ref 기반 차감/환불 함수 — 같은 async 흐름에서 호출해도 최신 값 보장
+  const deductTokens = useCallback(async (delta: number) => {
+    const newCount = userTokensRef.current - delta;
+    userTokensRef.current = newCount; // 즉시 ref 갱신
+    setUserTokens(newCount);
+
+    if (!user) return;
+    try {
+      const { error } = await supabase
+        .from('user_tokens')
+        .update({
+          tokens_remaining: newCount,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', user.id);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Failed to sync tokens to DB:', error);
+    }
+  }, [user]);
+
   return (
     <TokenContext.Provider value={{
       userTokens,
       updateUserTokens,
+      deductTokens,
       refreshTokens: fetchUserTokens
     }}>
       {children}

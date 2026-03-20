@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
 import { Project } from '../types';
+import { useToast } from '../contexts/ToastContext';
 
 interface FeedComposerProps {
     user: User | null;
@@ -10,6 +11,7 @@ interface FeedComposerProps {
 }
 
 const FeedComposer: React.FC<FeedComposerProps> = ({ user, onPostCreated, onLoginClick }) => {
+    const { showToast } = useToast();
     const [text, setText] = useState('');
     const [selectedImage, setSelectedImage] = useState<File | null>(null);
     const [imagePreview, setImagePreview] = useState<string>('');
@@ -72,7 +74,7 @@ const FeedComposer: React.FC<FeedComposerProps> = ({ user, onPostCreated, onLogi
                     imageUrl = await uploadToR2(selectedImage, 'community-uploads');
                 } catch (e) {
                     console.error("Image upload failed", e);
-                    alert("Image upload failed");
+                    showToast("Image upload failed", 'error');
                     setIsPosting(false);
                     return;
                 }
@@ -140,7 +142,7 @@ const FeedComposer: React.FC<FeedComposerProps> = ({ user, onPostCreated, onLogi
 
         } catch (error: any) {
             console.error('Post failed:', error);
-            alert(`Failed to post: ${error.message || JSON.stringify(error)}`);
+            showToast(`Failed to post: ${error.message || JSON.stringify(error)}`, 'error');
         } finally {
             setIsPosting(false);
         }

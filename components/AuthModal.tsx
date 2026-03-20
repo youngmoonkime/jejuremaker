@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 
 import { Language } from '../contexts/ThemeContext';
+import { useToast } from '../contexts/ToastContext';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ interface AuthModalProps {
 }
 
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, supabase, onClose, onSuccess, language, currentView, projectId }) => {
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
@@ -43,7 +45,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, supabase, onClose, onSucc
       }
     } catch (error) {
       console.error("AuthModal: Login process failed:", error);
-      alert(`Google Login Error: ${error.message}`);
+      showToast(`Google 로그인 오류: ${(error as any).message}`, 'error');
       setLoading(false);
     }
   };

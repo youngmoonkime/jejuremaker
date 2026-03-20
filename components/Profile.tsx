@@ -5,6 +5,7 @@ import { User } from '@supabase/supabase-js';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 import { uploadToR2 } from '../services/r2Storage';
 import { supabase } from '../services/supabase';
+import { useToast } from '../contexts/ToastContext';
 
 interface ProfileProps {
     onNavigate: (view: 'discovery' | 'detail' | 'upload' | 'trending' | 'community' | 'profile') => void;
@@ -91,6 +92,7 @@ const Profile: React.FC<ProfileProps> = ({
     onEdit,
     onProfileUpdate
 }) => {
+    const { showToast } = useToast();
     const t = TRANSLATIONS[language];
     const isGuestView = !!targetUserId && targetUserId !== user?.id;
 
@@ -206,7 +208,7 @@ const Profile: React.FC<ProfileProps> = ({
             setAvatarUrl(url);
         } catch (error) {
             console.error('Failed to upload avatar:', error);
-            alert('Failed to upload image. Please try again.');
+            showToast('Failed to upload image. Please try again.', 'error');
         } finally {
             setIsUploading(false);
         }
@@ -247,7 +249,7 @@ const Profile: React.FC<ProfileProps> = ({
             }
             
             setIsEditing(false);
-            alert(language === 'ko' ? '프로필이 저장되었습니다!' : 'Profile saved successfully!');
+            showToast(language === 'ko' ? '프로필이 저장되었습니다!' : 'Profile saved successfully!', 'success');
 
             // 4. BACKGROUND TASK: Sync historical posts
             // We do this without 'awaiting' to ensure the UI isn't blocked by O(N) database operations
@@ -284,7 +286,7 @@ const Profile: React.FC<ProfileProps> = ({
 
         } catch (error) {
             console.error('Failed to update profile:', error);
-            alert('Failed to save profile. Please try again.');
+            showToast('Failed to save profile. Please try again.', 'error');
         }
     };
 

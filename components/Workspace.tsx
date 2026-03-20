@@ -21,6 +21,7 @@ import { Project } from '../types';
 import { config } from '../services/config';
 import * as aiService from '../services/aiService';
 import { Language } from '../contexts/ThemeContext';
+import { useToast } from '../contexts/ToastContext';
 import { ReactFlow, Background, applyNodeChanges, applyEdgeChanges, addEdge, Connection, Edge, Node, NodeChange, EdgeChange, ReactFlowInstance } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { CustomNode } from './CustomNode';
@@ -103,6 +104,7 @@ interface WorkspaceProps {
 type TabMode = 'EXPERT' | 'COPILOT';
 
 const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTokens, setUserTokens, initialMode = 'human', isAiProject = false, onlineUsers = [], globalChannel, currentUserId, initialSelectedPeerId }) => {
+  const { showToast } = useToast();
   const { setActiveChatPartnerId } = useNotifications();
   const [activeTab, setActiveTab] = useState<TabMode>(initialMode === 'ai' ? 'COPILOT' : 'EXPERT');
   const [input, setInput] = useState('');
@@ -396,7 +398,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
     if (!file) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      alert("이미지는 5MB 이하만 업로드 가능합니다.");
+      showToast("이미지는 5MB 이하만 업로드 가능합니다.", 'warning');
       return;
     }
 
@@ -533,8 +535,8 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
             content: n.data.content as string
         }));
 
-        // --- SECURITY GATE: Check if current user has permission for original fabrication guide ---
-        const hasDetailedAccess = !!(currentUserId && project?.ownerId && currentUserId === project.ownerId);
+        // --- 모든 로그인 사용자에게 코파일럿 전체 기능 허용 ---
+        const hasDetailedAccess = true;
 
         // 1. Analyze Intent (Pass User Nickname & Attached Image)
         const analysis: any = await aiService.analyzeCopilotIntent(userMsg, project, recentNodes, taggedNodeId, userNickname, attachedImageBase64, hasDetailedAccess);
@@ -809,7 +811,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
     } catch (error) {
        console.error("Export failed:", error);
-       alert("Export 중 오류가 발생했습니다.");
+       showToast("Export 중 오류가 발생했습니다.", 'error');
     } finally {
        setIsLoading(false);
     }

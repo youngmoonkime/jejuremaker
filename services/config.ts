@@ -40,7 +40,7 @@ export const config = {
         analysis: "gemini-2.5-flash",
         guide: "gemini-3-flash-preview",
         productImage: "gemini-2.5-flash-image", // Nano Banana2
-        blueprintImage: "gemini-3.1-flash-image-preview", // Fallback for blueprint
+        blueprintImage: "gemini-3.1-flash-image-preview", // 상세도/조립가이드 생성용
         tripo: "default", // Tripo auto-selects best model usually
     },
 };

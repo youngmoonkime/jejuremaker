@@ -25,6 +25,7 @@ import {
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Project } from '../types';
 import { Language } from '../contexts/ThemeContext';
+import { useToast } from '../contexts/ToastContext';
 
 // --- Cloudflare R2 Configuration ---
 import { config } from '../services/config';
@@ -271,6 +272,7 @@ const DROPDOWN_TRANSLATIONS = {
 };
 
 const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadComplete, language, user, onSelectProject, initialProject }) => {
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('upload');
   const [inventory, setInventory] = useState([]);
@@ -365,7 +367,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   const handleVerifyEco = async () => {
     if (!formData.title || !formData.material || !formData.steps[0].desc) {
-      alert("분석을 위해 프로젝트 제목, 재료, 그리고 최소 1개의 제작 단계를 입력해주세요.");
+      showToast("분석을 위해 프로젝트 제목, 재료, 그리고 최소 1개의 제작 단계를 입력해주세요.", 'warning');
       return;
     }
     setIsVerifying(true);
@@ -380,7 +382,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
       setEcoValidation(result);
     } catch (e) {
       console.error(e);
-      alert("분석 중 오류가 발생했습니다.");
+      showToast("분석 중 오류가 발생했습니다.", 'error');
     } finally {
       setIsVerifying(false);
     }
@@ -457,7 +459,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   const handleModelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const validFiles = Array.from(e.target.files as FileList).filter(file => {
-        if (file.size > MAX_FILE_SIZE) { alert(`${t.alert.sizeError} (${file.name})`); return false; }
+        if (file.size > MAX_FILE_SIZE) { showToast(`${t.alert.sizeError} (${file.name})`, 'warning'); return false; }
         return true;
       });
       setModelFiles(prev => [...prev, ...validFiles]);
@@ -500,7 +502,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (imageFiles.length === 0 && existingImages.length === 0) { alert(t.visuals.selectImage); return; }
+    if (imageFiles.length === 0 && existingImages.length === 0) { showToast(t.visuals.selectImage, 'warning'); return; }
     setLoading(true);
     try {
       const uploadedImageUrls: string[] = [];
@@ -553,9 +555,9 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         isAiRemix: formData.isAI, description: `Project: ${formData.title}`, steps: processedSteps as any[],
         downloadUrl: allModelFiles.length > 0 ? allModelFiles[0].url : '', modelFiles: allModelFiles
       });
-      alert(initialProject ? '수정되었습니다.' : '게시되었습니다.');
+      showToast(initialProject ? '수정되었습니다.' : '게시되었습니다.', 'success');
     } catch (error: any) {
-      alert(`오류: ${error.message}`);
+      showToast(`오류: ${error.message}`, 'error');
     } finally {
       setLoading(false);
     }

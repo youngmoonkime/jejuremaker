@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
+import { useToast } from './ToastContext';
 
 // Re-using ViewState type from App (or we could move it to types.ts later)
 type ViewState = 'discovery' | 'detail' | 'workspace' | 'upload' | 'trending' | 'community' | 'profile' | 'lab';
@@ -43,6 +44,7 @@ export const getVirtualNickname = (userId: string) => {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { showToast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<{ nickname: string; avatarUrl: string } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -117,7 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastUserIdRef.current = null; // CRITICAL: Clear ref so next login is detected
       setUser(null);
       setUserProfile(null);
-      alert(language === 'ko' ? '로그아웃 되었습니다.' : 'Logged out successfully.');
+      showToast(language === 'ko' ? '로그아웃 되었습니다.' : 'Logged out successfully.', 'info');
       setShowAuthModal(false);
     } catch (err) {
       console.error("Logout failed", err);

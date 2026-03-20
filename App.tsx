@@ -4,6 +4,7 @@ import Discovery from './components/Discovery';
 import ProjectDetail from './components/ProjectDetail';
 import Layout from './components/Layout';
 import AuthModal from './components/AuthModal';
+import PricingModal from './components/PricingModal';
 import { Project, Maker } from './types';
 import { supabase } from './services/supabase';
 
@@ -13,6 +14,7 @@ import { useTheme } from './contexts/ThemeContext';
 import { useTokens } from './contexts/TokenContext';
 import { useProjects } from './contexts/ProjectContext';
 import { useNotifications } from './contexts/NotificationContext';
+import { useToast } from './contexts/ToastContext';
 import { deleteFromR2, getR2KeyFromUrl } from './services/r2Storage';
 
 // Lazy-loaded components (code splitting)
@@ -40,9 +42,10 @@ const INITIAL_PROJECTS: Project[] = [];
 
 const App: React.FC = () => {
   // 1. Context Hooks
+  const { showToast } = useToast();
   const { user, userProfile, isAdmin, isSuperAdmin, showAuthModal, authTargetView, handleLogout, handleLoginClick, setShowAuthModal, refreshUserProfile } = useAuth();
   const { isDarkMode, language, toggleDarkMode, toggleLanguage } = useTheme();
-  const { userTokens, updateUserTokens, refreshTokens } = useTokens();
+  const { userTokens, updateUserTokens, deductTokens, refreshTokens } = useTokens();
   const { projects, myProjects, trendingProjects, hasMoreProjects, isLoading, isLoadingMoreProjects, fetchProjects, fetchMyProjects, fetchTrendingProjects, fetchProjectDetails, loadMoreProjects, handleLikeToggle, handleViewIncrement, setProjects, likedProjects, onLikeToggle, allMaterials, fetchAllMaterials } = useProjects();
   const { notifications, onlineUsers, toastNotification, setToastNotification, handleNotificationClick, handleNotificationDelete } = useNotifications();
 
@@ -93,6 +96,7 @@ const App: React.FC = () => {
   });
   
   const [showWizard, setShowWizard] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
   const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
   const [workspaceInitialMode, setWorkspaceInitialMode] = useState<'human' | 'ai' | null>(null);
   const [workspaceSelectedPeerId, setWorkspaceSelectedPeerId] = useState<string | null>(null);
@@ -233,7 +237,7 @@ const App: React.FC = () => {
       handleLoginClick('discovery');
     } else {
       if (userTokens < 20) {
-        alert(language === 'ko' ? '토큰이 부족합니다. (필요: 20)' : 'Not enough tokens. (Required: 20)');
+        showToast(language === 'ko' ? '토큰이 부족합니다. (필요: 20)' : 'Not enough tokens. (Required: 20)', 'warning');
         return;
       }
       updateUserTokens(userTokens - 20);
@@ -280,17 +284,17 @@ const App: React.FC = () => {
 
           if (grantError) {
               console.error("Grant Access Error:", grantError);
-              alert(language === 'ko' ? `승인 실패: ${grantError.message}` : `Approval failed: ${grantError.message}`);
+              showToast(language === 'ko' ? `승인 실패: ${grantError.message}` : `Approval failed: ${grantError.message}`, 'error');
               return;
           }
 
           // 2. Send Confirmation Message
           await handleSendMessage();
           
-          alert(language === 'ko' ? '승인 및 메시지 전송이 완료되었습니다.' : 'Approval and confirmation message sent!');
+          showToast(language === 'ko' ? '승인 및 메시지 전송이 완료되었습니다.' : 'Approval and confirmation message sent!', 'success');
       } catch (err: any) {
           console.error("Failed to approve request", err);
-          alert(language === 'ko' ? `오류가 발생했습니다: ${err.message}` : `An error occurred: ${err.message}`);
+          showToast(language === 'ko' ? `오류가 발생했습니다: ${err.message}` : `An error occurred: ${err.message}`, 'error');
       }
   };
 
@@ -319,16 +323,16 @@ const App: React.FC = () => {
 
           if (error) {
               console.error("Supabase DM Error:", error);
-              alert(language === 'ko' ? `메시지 전송 실패: ${error.message}` : `Failed to send message: ${error.message}`);
+              showToast(language === 'ko' ? `메시지 전송 실패: ${error.message}` : `Failed to send message: ${error.message}`, 'error');
               return;
           }
 
-          alert(language === 'ko' ? '메시지를 보냈습니다.' : 'Message sent!');
+          showToast(language === 'ko' ? '메시지를 보냈습니다.' : 'Message sent!', 'success');
           setShowMessageModal(false);
           setMessageText('');
       } catch (err: any) {
           console.error("Failed to send message", err);
-          alert(language === 'ko' ? `오류가 발생했습니다: ${err.message || '알 수 없는 오류'}` : `An error occurred: ${err.message || 'Unknown error'}`);
+          showToast(language === 'ko' ? `오류가 발생했습니다: ${err.message || '알 수 없는 오류'}` : `An error occurred: ${err.message || 'Unknown error'}`, 'error');
       }
   };
 
@@ -344,7 +348,7 @@ const App: React.FC = () => {
       fetchProjects(); 
       fetchMyProjects();
       fetchChallengeStats(); // Refresh stats after publishing
-      alert(language === 'ko' ? '프로젝트가 게시되었습니다.' : 'Project published successfully.');
+      showToast(language === 'ko' ? '프로젝트가 게시되었습니다.' : 'Project published successfully.', 'success');
     } catch (error) {
       console.error('Failed to publish project:', error);
     }
@@ -488,7 +492,7 @@ const App: React.FC = () => {
             language={language}
             likedProjects={likedProjects}
             userTokens={userTokens}
-            onDeductTokens={updateUserTokens}
+            onDeductTokens={deductTokens}
             onLoginClick={handleLoginClick}
             onNavigate={handleNavigate}
             isDarkMode={isDarkMode}
@@ -508,7 +512,10 @@ const App: React.FC = () => {
               onLogout={() => handleLogout(language)}
               userTokens={userTokens}
               setUserTokens={updateUserTokens}
-              onAddProject={(p) => setProjects([p, ...projects])}
+              onAddProject={(p) => {
+                setProjects([p, ...projects]);
+                setCurrentView('profile');
+              }}
               onLikeToggle={onLikeToggle}
               likedProjects={likedProjects}
               onAnalyzeClick={handleAnalyzeRequest}
@@ -599,9 +606,37 @@ const App: React.FC = () => {
         );
 
       case 'lab':
+        if (!isSuperAdmin) {
+          return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+              <div className="w-20 h-20 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-6">
+                <span className="material-icons-round text-4xl text-amber-500">construction</span>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
+                {language === 'ko' ? '오픈 준비 중' : 'Coming Soon'}
+              </h2>
+              <p className="text-gray-500 dark:text-gray-400 max-w-sm leading-relaxed mb-6">
+                {language === 'ko'
+                  ? '제주 리메이크 랩은 현재 오픈 준비 중입니다. 곧 만나요!'
+                  : 'Jeju Remake Lab is currently under preparation. See you soon!'}
+              </p>
+              <button
+                onClick={() => setCurrentView('discovery')}
+                className="px-6 py-3 rounded-2xl bg-primary text-white font-bold hover:bg-primary/90 transition"
+              >
+                {language === 'ko' ? '홈으로 돌아가기' : 'Back to Home'}
+              </button>
+            </div>
+          );
+        }
         return (
           <Suspense fallback={<LazyFallback />}>
-            <RemakeLab language={language} userTokens={userTokens} />
+            <RemakeLab
+                language={language}
+                userTokens={userTokens}
+                setUserTokens={updateUserTokens}
+                onTokenClick={() => setShowPricingModal(true)}
+            />
           </Suspense>
         );
 
@@ -666,7 +701,7 @@ const App: React.FC = () => {
                       ]);
                   } catch (e: any) { 
                       console.error("Deletion failed:", e);
-                      alert(language === 'ko' ? `삭제 실패: ${e.message}` : `Deletion failed: ${e.message}`);
+                      showToast(language === 'ko' ? `삭제 실패: ${e.message}` : `Deletion failed: ${e.message}`, 'error');
                   }
               }}
               onNavigate={handleNavigate}
@@ -763,8 +798,12 @@ const App: React.FC = () => {
         showWizard={showWizard}
         setShowWizard={setShowWizard}
         setUserTokens={updateUserTokens}
-        onAddProject={(p) => setProjects([p, ...projects])}
+        onAddProject={(p) => {
+          setProjects([p, ...projects]);
+          setCurrentView('profile');
+        }}
         onCancel={handleWizardCancel}
+        onTokenClick={() => setShowPricingModal(true)}
       >
         <main className={(currentView === 'upload' || currentView === 'lab' || currentView === 'workspace') ? "w-full min-h-full relative" : "max-w-7xl mx-auto px-4 py-8 relative"}>
           {renderCurrentView()}
@@ -772,6 +811,14 @@ const App: React.FC = () => {
       </Layout>
 
       {/* Shared Modals & Toasts */}
+      <PricingModal
+        isOpen={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+        language={language}
+        userTokens={userTokens}
+        onPurchaseTokens={() => {}}
+        onSubscribe={() => {}}
+      />
       <AuthModal 
         isOpen={showAuthModal} 
         supabase={supabase}

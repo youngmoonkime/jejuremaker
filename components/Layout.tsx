@@ -44,6 +44,7 @@ interface LayoutProps {
         user_private_count: number;
     } | null;
     isSuperAdmin: boolean;
+    onTokenClick?: () => void;
 }
 
 const Layout: React.FC<LayoutProps> = ({
@@ -74,11 +75,12 @@ const Layout: React.FC<LayoutProps> = ({
     onNotificationClick,
     onDeleteNotification,
     challengeStats,
-    isSuperAdmin
+    isSuperAdmin,
+    onTokenClick
 }) => {
     return (
         <div className={`min-h-screen text-gray-800 dark:text-gray-100 bg-background-light dark:bg-background-dark transition-colors duration-300`}>
-            {(currentView !== 'upload' && currentView !== 'lab' && currentView !== 'workspace') && (
+            {(currentView !== 'upload' && currentView !== 'workspace') && (
                 <Header
                     user={user}
                     userProfile={userProfile}
@@ -96,10 +98,11 @@ const Layout: React.FC<LayoutProps> = ({
                     onNotificationClick={onNotificationClick}
                     onDeleteNotification={onDeleteNotification}
                     projects={projects}
+                    onTokenClick={onTokenClick}
                 />
             )}
 
-            <div className={(currentView === 'upload' || currentView === 'lab' || currentView === 'workspace') ? 'w-full min-h-screen flex flex-col' : "max-w-[1600px] mx-auto pt-20 lg:pt-24 pb-24 lg:pb-12 px-4 lg:px-6 flex flex-col lg:flex-row lg:gap-10"}>
+            <div className={(currentView === 'upload' || currentView === 'lab' || currentView === 'workspace') ? 'w-full min-h-screen flex flex-col pt-16' : "max-w-[1600px] mx-auto pt-20 lg:pt-24 pb-24 lg:pb-12 px-4 lg:px-6 flex flex-col lg:flex-row lg:gap-10"}>
                 {(currentView !== 'upload' && currentView !== 'lab') && (
                     <>
                         {/* Desktop Sidebar */}
@@ -115,8 +118,7 @@ const Layout: React.FC<LayoutProps> = ({
                             myProjects={myProjects}
                             challengeStats={challengeStats}
                             isSuperAdmin={isSuperAdmin}
-                            userTokens={userTokens}
-                            setUserTokens={setUserTokens}
+
                         />
 
                         {/* Mobile Bottom Navigation */}

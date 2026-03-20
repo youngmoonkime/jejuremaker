@@ -152,7 +152,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     const ownerId = project?.ownerId;
     const adminMode = !!isSuperAdmin;
     
-    const calculatedIsOwner = !!(userId && ownerId && String(userId).trim() === String(ownerId).trim());
+    // Support both ownerId and owner_id for robustness during transitions
+    const actualOwnerId = ownerId || (project as any)?.owner_id;
+    const calculatedIsOwner = !!(userId && actualOwnerId && String(userId).trim() === String(actualOwnerId).trim());
+    
     setIsProjectOwner(calculatedIsOwner);
 
     // Initial guide access (Owner/Admin only)
@@ -164,7 +167,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
         setHasMechanicalAccess(true);
         setHas3DAccess(true);
     }
-  }, [user?.id, project?.ownerId, isSuperAdmin]);
+  }, [user?.id, project?.ownerId, (project as any)?.owner_id, isSuperAdmin]);
 
   // --- AI Copilot State ---
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
@@ -184,7 +187,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const [show3DModal, setShow3DModal] = useState(false);
 
   // Toast Notification State
-  const [toastMessage, setToastMessage] = useState<{ show: boolean, message: string, type: 'info' | 'success' | 'error' }>({ show: false, message: '', type: 'info' });
+  const [toastMessage, setToastMessage] = useState<{ show: boolean, message: string, type: 'info' | 'success' | 'error' | 'warning' }>({ show: false, message: '', type: 'info' });
 
   // --- Inline Edit State ---
   const [isEditMode, setIsEditMode] = useState(false);
@@ -211,7 +214,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     showToast(language === 'ko' ? `${cost} 토큰이 반환되었습니다.` : `${cost} tokens refunded.`, 'success');
   };
 
-  const showToast = (message: string, type: 'info' | 'success' | 'error' = 'info', duration = 4000) => {
+  const showToast = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info', duration = 4000) => {
     setToastMessage({ show: true, message, type });
     setTimeout(() => {
       setToastMessage(prev => ({ ...prev, show: false }));
@@ -516,7 +519,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     const files = project?.modelFiles || [];
 
     if (files.length === 0) {
-      alert(t.noFiles);
+      showToast(t.noFiles, 'warning');
       return;
     }
 
@@ -552,17 +555,39 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     // Add images to zip
     await Promise.all(imageUrls.map(async (url: string, index: number) => {
       try {
-        let response;
-        try {
-          response = await fetch(url, { mode: 'cors' });
-          if (!response.ok) throw new Error('Network response was not ok');
-        } catch (err) {
-          const baseUrl = import.meta.env.DEV ? 'https://jejuremaker.pages.dev' : '';
-          const proxyUrl = `${baseUrl}/api/tripo-proxy?url=${encodeURIComponent(url)}`;
-          response = await fetch(proxyUrl);
+        let blob: Blob;
+        
+        if (url.startsWith('data:image')) {
+          // Handle Base64 directly without network request
+          const mimeType = url.split(':')[1]?.split(';')[0] || 'image/png';
+          blob = base64ToBlob(url, mimeType);
+        } else {
+          // Fetch external images with proxy fallback
+          let response;
+          try {
+            // Bypass browser cache (opaque response) by adding a timestamp
+            const fetchUrl = url.includes('?') ? `${url}&_cb=${Date.now()}` : `${url}?_cb=${Date.now()}`;
+            response = await fetch(fetchUrl, { mode: 'cors' });
+            if (!response.ok) throw new Error('CORS or Network error');
+          } catch (err) {
+            // Fallback to Supabase Edge Function Proxy (works for R2 & Tripo, fails for Google due to whitelist)
+            const proxyUrl = `${config.supabase.url}/functions/v1/tripo-file-proxy?url=${encodeURIComponent(url)}`;
+            response = await fetch(proxyUrl);
+          }
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+          }
+          
+          blob = await response.blob();
         }
 
-        const blob = await response.blob();
+        // Validate: Ensure it's not an error message (too small for a real image) or an HTML document
+        if (blob.size < 500 || blob.type.includes('text/html')) {
+            console.warn(`Suspiciously small file or HTML document (${blob.size} bytes, type ${blob.type}) for URL: ${url}. Skipping.`);
+            return;
+        }
+
         // Determine name
         let name = `image_${index + 1}.png`;
         if (url === blueprintUrl) name = `blueprint_production.png`;
@@ -571,7 +596,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
 
         folder?.file(name, blob);
       } catch (e) {
-        console.error("Failed to add image to zip", e);
+        console.error("Failed to add image to zip", e, "URL:", url);
       }
     }));
 
@@ -588,13 +613,14 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     });
   };
 
-  const handleConnectMaker = () => {
+  const handleConnectMaker = (forceMessage: boolean = false) => {
     if (!user) {
       onLoginClick('detail');
       return;
     }
 
-    if (isAiProject) {
+    // 로그인한 모든 사용자가 AI 코파일럿에 접근 가능
+    if (!forceMessage) {
       onAnalyze();
       return;
     }
@@ -609,9 +635,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
         rawLikes: 0,
       };
       
-      // If the owner is the current user themselves
+      // 일반 메이커 연결 시, 자신의 프로젝트면 차단
       if (user.id === project.ownerId) {
-        alert(language === 'ko' ? '자신의 프로젝트입니다.' : 'This is your own project.');
+        showToast(language === 'ko' ? '자신의 프로젝트입니다.' : 'This is your own project.', 'info');
         return;
       }
 
@@ -621,6 +647,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
       });
     }
   };
+
 
   // Determine what content to show
   const displayTitle = project?.title || t.title;
@@ -717,7 +744,11 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
 
   // Logic for fabrication steps
   // If the project has custom steps, use them. Otherwise use the default steps from translation.
-  const activeSteps = syncedMetadata?.fabrication_guide || project?.steps;
+  // CRITICAL FIX: Ensure we fallback to metadata.fabrication_guide if project.steps is not present or empty
+  const activeSteps = (project?.steps && project.steps.length > 0) 
+    ? project.steps 
+    : (syncedMetadata?.fabrication_guide || (project as any)?.metadata?.fabrication_guide || (project as any)?.metadata?.guide?.steps);
+
   const displaySteps = (activeSteps && activeSteps.length > 0)
     ? activeSteps.map((s: any, i: number) => ({
       id: (i + 1).toString().padStart(2, '0'),
@@ -747,13 +778,13 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const handleGenerateAdditionalBlueprint = async (type: 'detailed' | 'mechanical') => {
     // Access Control: Only valid owner can generate
     if (!user || user.id !== project?.ownerId) {
-      alert(language === 'ko' ? '작성자만 도면을 생성할 수 있습니다.' : 'Only the author can generate blueprints.');
+      showToast(language === 'ko' ? '작성자만 도면을 생성할 수 있습니다.' : 'Only the author can generate blueprints.', 'warning');
       return;
     }
 
     const cost = 5; // Both types now cost 5 tokens
     if (userTokens < cost) {
-      alert('토큰이 부족합니다. (필요: ' + cost + ', 보유: ' + userTokens + ')');
+      showToast('토큰이 부족합니다. (필요: ' + cost + ', 보유: ' + userTokens + ')', 'warning');
       return;
     }
 
@@ -834,7 +865,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const handleGenerate3DModel = async () => {
     // Access Control: Only Owner
     if (!user || user.id !== project?.ownerId) {
-      alert(language === 'ko' ? '작성자만 3D 모델을 생성할 수 있습니다.' : 'Only the author can generate 3D models.');
+      showToast(language === 'ko' ? '작성자만 3D 모델을 생성할 수 있습니다.' : 'Only the author can generate 3D models.', 'warning');
       return;
     }
 
@@ -845,7 +876,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
 
     const cost = 30; // 30 tokens for 3D generation
     if (userTokens < cost) {
-      alert('토큰이 부족합니다. (필요: ' + cost + ', 보유: ' + userTokens + ')');
+      showToast('토큰이 부족합니다. (필요: ' + cost + ', 보유: ' + userTokens + ')', 'warning');
       return;
     }
 
@@ -901,10 +932,11 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     <>
       {/* Toast Notification */}
       <div className={`fixed bottom-24 lg:bottom-10 right-4 lg:right-10 px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 transition-all duration-500 z-[100] transform ${toastMessage.show ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-10 opacity-0 scale-95 pointer-events-none'}
-        ${toastMessage.type === 'success' ? 'bg-green-500 text-white' : toastMessage.type === 'error' ? 'bg-red-500 text-white' : 'bg-gray-900 border border-gray-700 text-white'}
+        ${toastMessage.type === 'success' ? 'bg-green-500 text-white' : toastMessage.type === 'error' ? 'bg-red-500 text-white' : toastMessage.type === 'warning' ? 'bg-amber-500 text-white' : 'bg-gray-900 border border-gray-700 text-white'}
       `}>
         {toastMessage.type === 'success' ? <span className="material-icons-round">check_circle</span> :
          toastMessage.type === 'error' ? <span className="material-icons-round">error</span> :
+         toastMessage.type === 'warning' ? <span className="material-icons-round">warning</span> :
          <span className="material-icons-round animate-spin">sync</span>}
         <p className="font-bold text-sm select-none break-keep w-max max-w-[80vw] sm:max-w-md">{toastMessage.message}</p>
       </div>
@@ -1678,13 +1710,17 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               {/* CTA Buttons */}
               <div className="space-y-3">
                 <button
-                  onClick={handleConnectMaker}
-                  className={`w-full py-4 px-6 text-white rounded-xl font-bold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all flex items-center justify-center space-x-2
-                       ${isAiProject ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-900 dark:bg-white dark:text-gray-900'}
-                    `}
+                  onClick={() => {
+                    if (!user) {
+                      onLoginClick('detail');
+                    } else {
+                      onAnalyze();
+                    }
+                  }}
+                  className="w-full py-4 px-6 text-white rounded-xl font-bold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all flex items-center justify-center space-x-2 bg-indigo-600 hover:bg-indigo-700"
                 >
-                  <span>{isAiProject ? t.connectAI : t.findMaker}</span>
-                  <span className="material-icons-round text-sm">{isAiProject ? 'smart_toy' : 'arrow_forward'}</span>
+                  <span>{t.connectAI}</span>
+                  <span className="material-icons-round text-sm">smart_toy</span>
                 </button>
                 {/* Advanced Download Dropdown */}
                 <div className="relative group z-30 w-full">
@@ -1712,7 +1748,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                           if (url) {
                             downloadFile({ name: `${project?.title || 'model'}.glb`, url: url });
                           } else {
-                            alert(t.noFiles);
+                            showToast(t.noFiles, 'warning');
                           }
                         }
                       }}
@@ -1728,7 +1764,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                         if (displayImages.length > 0) {
                           downloadImagesAsZip();
                         } else {
-                          alert(t.noFiles);
+                          showToast(t.noFiles, 'warning');
                         }
                       }}
                       className="w-full text-left px-5 py-3 text-gray-200 hover:bg-white/10 text-sm font-medium flex items-center justify-between"
@@ -1915,7 +1951,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                   : 'Due to accuracy verification and quality control of AI-generated guides, this section is only available to the creator.'}
               </p>
               <button
-                onClick={handleConnectMaker}
+                onClick={() => handleConnectMaker(true)}
                 className="px-6 py-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-gray-200 shadow-sm hover:shadow-md transition-all active:scale-95"
               >
                 {language === 'ko' ? '제작자에게 문의하기' : 'Contact Maker'}

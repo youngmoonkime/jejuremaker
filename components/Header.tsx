@@ -21,6 +21,7 @@ interface HeaderProps {
     onNotificationClick?: (projectId: string, notifId: string) => void;
     onDeleteNotification?: (notifId: string) => void;
     projects?: Project[];
+    onTokenClick?: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -40,7 +41,8 @@ const Header: React.FC<HeaderProps> = ({
     notifications,
     onNotificationClick,
     onDeleteNotification,
-    projects = []
+    projects = [],
+    onTokenClick
 }) => {
     const t = TRANSLATIONS[language];
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
@@ -132,7 +134,7 @@ const Header: React.FC<HeaderProps> = ({
             <div className="max-w-[1600px] mx-auto px-4 md:px-6 h-full flex items-center justify-between relative">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavigate('discovery')}>
                     <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/30 flex-shrink-0">
-                        <span className="material-icons-round text-xl">recycling</span>
+                        <span className="material-icons-round text-xl">{isLabView ? 'science' : 'recycling'}</span>
                     </div>
                     {isLabView ? (
                         <span className="font-bold text-lg md:text-xl tracking-tight text-gray-900 dark:text-white whitespace-nowrap">Jeju <span className="text-primary">Remake Lab</span></span>
@@ -216,7 +218,10 @@ const Header: React.FC<HeaderProps> = ({
 
                     {/* Token Display (If User) */}
                     {user && (
-                        <div className="hidden md:flex items-center gap-1.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 rounded-full border border-emerald-100 dark:border-emerald-800/50 shadow-sm">
+                        <div 
+                            onClick={onTokenClick}
+                            className="hidden md:flex items-center gap-1.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 rounded-full border border-emerald-100 dark:border-emerald-800/50 shadow-sm cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                        >
                             <span className="material-icons-round text-emerald-500 text-base">recycling</span>
                             <span className="text-sm font-bold text-emerald-900 dark:text-emerald-100">{userTokens}</span>
                         </div>
