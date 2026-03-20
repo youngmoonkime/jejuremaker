@@ -226,7 +226,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     setEditTitle(project?.title || '');
     setEditDescription(meta.description || project?.description || '');
     const steps = meta.fabrication_guide || project?.steps || [];
-    setEditSteps(steps.map((s: any) => ({ title: s.title || '', desc: s.desc || '', tip: s.tip || '' })));
+    setEditSteps(steps.map((s: any) => ({ title: s.title || '', desc: s.desc || s.description || s.content || s.instructions || '', tip: s.tip || '' })));
     const imgs = meta.images || project?.images || [];
     setEditImages({
       conceptImages: imgs.length > 0 ? [...imgs] : [project?.image || ''],
@@ -756,7 +756,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     ? activeSteps.map((s: any, i: number) => ({
       id: (i + 1).toString().padStart(2, '0'),
       title: s.title,
-      desc: s.desc,
+      desc: s.desc || s.description || s.content || s.instructions || '',
       tip: s.tip,
       imageUrl: s.imageUrl
     }))

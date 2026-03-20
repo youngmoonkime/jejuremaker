@@ -376,9 +376,14 @@ const WizardModal: React.FC<WizardModalProps> = ({
 
             // --- Validation & Defaults ---
             const safeGuide = guide || {};
-            const safeSteps = Array.isArray(safeGuide.steps) && safeGuide.steps.length > 0
+            const rawSteps = Array.isArray(safeGuide.steps) && safeGuide.steps.length > 0
                 ? safeGuide.steps
                 : [{ title: '프로젝트 시작', desc: 'AI가 생성한 가이드 정보를 불러오지 못했습니다. 나만의 창의적인 방법으로 프로젝트를 시작해보세요!', tip: '자유롭게 수정 가능합니다.' }];
+            // AI가 desc 대신 다른 필드명을 사용할 수 있으므로 정규화
+            const safeSteps = rawSteps.map((s: any) => ({
+                ...s,
+                desc: s.desc || s.description || s.content || s.instructions || '',
+            }));
 
             const safeDescription = safeGuide.description
                 || (safeGuide.steps?.[0]?.desc ? safeGuide.steps[0].desc.slice(0, 150) + "..." : null)
