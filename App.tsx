@@ -106,6 +106,7 @@ const App: React.FC = () => {
   const [messageTarget, setMessageTarget] = useState<Maker | null>(null);
   const [messageText, setMessageText] = useState('');
   const [messageOptions, setMessageOptions] = useState<{relatedProjectId?: string, relatedProjectTitle?: string, accessType?: 'blueprint' | '3d_model', isApproval?: boolean} | null>(null);
+  const [receivedMessage, setReceivedMessage] = useState<string>('');
 
   // Fetch trending projects when switching to trending view
   useEffect(() => {
@@ -268,6 +269,7 @@ const App: React.FC = () => {
     setMessageTarget(maker);
     setMessageText(initialMessage || '');
     setMessageOptions(options || null);
+    setReceivedMessage(options?.receivedMessage || '');
     setShowMessageModal(true);
   };
 
@@ -393,57 +395,59 @@ const App: React.FC = () => {
       const accessType = notif.metadata?.accessType || notif.accessType;
       const isApproval = notif.metadata?.type === 'access_approved' || notif.metadata?.isApproval;
 
-      if (isApproval && (notif.relatedProjectId || notif.projectId)) {
-          const targetId = notif.relatedProjectId || notif.projectId;
-          const targetProj = projects.find(p => String(p.id) === String(targetId)) || 
-                           myProjects.find(p => String(p.id) === String(targetId));
-          
-          if (targetProj) {
-              handleProjectSelect(targetProj);
-          } else {
-              fetchProjectDetails(targetId).then(fetched => {
-                  if (fetched) handleProjectSelect(fetched);
-              });
-          }
-          return;
-      }
-
-      if (accessType && !isApproval) {
+      if (isApproval) {
         handleOpenMessageModal({
           name: notif.sender,
           avatar: notif.senderAvatar,
           userId: notif.senderUserId,
           projects: 0,
           likes: '0'
-        }, (language === 'ko' ? '도면 요청을 승인했습니다. 이제 프로젝트에서 확인하실 수 있습니다.' : 'I have approved your request. You can now view it in the project.'), {
+        }, '', {
           relatedProjectId: notif.relatedProjectId || notif.projectId,
           relatedProjectTitle: notif.projectTitle,
-          accessType: accessType,
-          isApproval: true
+          receivedMessage: notif.message
         });
         return;
       }
 
-      // Check if it's a workspace chat notification
-      const isWorkspaceChat = (notif.metadata?.type === 'workspace_chat') || 
-                             (notif.projectTitle?.includes('Direct Message') === false && notif.projectId !== 'direct_message');
-      
-      const targetProjectId = notif.relatedProjectId || notif.projectId;
+      if (accessType && !isApproval) {
+        const approvalMsg = accessType === 'fabrication_guide'
+          ? (language === 'ko' ? '제작가이드 요청을 승인했습니다. 이제 프로젝트에서 확인하실 수 있습니다.' : 'I have approved your fabrication guide request. You can now view it in the project.')
+          : (language === 'ko' ? '도면 요청을 승인했습니다. 이제 프로젝트에서 확인하실 수 있습니다.' : 'I have approved your request. You can now view it in the project.');
+        handleOpenMessageModal({
+          name: notif.sender,
+          avatar: notif.senderAvatar,
+          userId: notif.senderUserId,
+          projects: 0,
+          likes: '0'
+        }, approvalMsg, {
+          relatedProjectId: notif.relatedProjectId || notif.projectId,
+          relatedProjectTitle: notif.projectTitle,
+          accessType: accessType,
+          isApproval: true,
+          receivedMessage: notif.message
+        });
+        return;
+      }
 
-      if (isWorkspaceChat && targetProjectId && targetProjectId !== 'direct_message') {
-        const targetProj = projects.find(p => String(p.id) === String(targetProjectId)) || 
-                         myProjects.find(p => String(p.id) === String(targetProjectId));
-        
-        if (targetProj) {
-          setProjectToEdit(targetProj);
-          setWorkspaceInitialMode('human');
-          setWorkspaceSelectedPeerId(notif.senderUserId);
-          setCurrentView('workspace');
-          return;
+      // Check if it's a workspace chat notification (명시적으로 workspace_chat 타입인 경우만)
+      if (notif.metadata?.type === 'workspace_chat') {
+        const targetProjectId = notif.relatedProjectId || notif.projectId;
+        if (targetProjectId && targetProjectId !== 'direct_message') {
+          const targetProj = projects.find(p => String(p.id) === String(targetProjectId)) ||
+                           myProjects.find(p => String(p.id) === String(targetProjectId));
+
+          if (targetProj) {
+            setProjectToEdit(targetProj);
+            setWorkspaceInitialMode('human');
+            setWorkspaceSelectedPeerId(notif.senderUserId);
+            setCurrentView('workspace');
+            return;
+          }
         }
       }
 
-      // Default: Open message modal for reply
+      // Default: Open message modal for reply (원본 메시지 포함)
       handleOpenMessageModal({
         name: notif.sender,
         avatar: notif.senderAvatar,
@@ -453,7 +457,8 @@ const App: React.FC = () => {
       }, '', {
         relatedProjectId: notif.relatedProjectId,
         relatedProjectTitle: notif.projectTitle,
-        accessType: notif.accessType
+        accessType: notif.accessType,
+        receivedMessage: notif.message
       });
     });
   };
@@ -882,13 +887,26 @@ const App: React.FC = () => {
           <div className="bg-white dark:bg-gray-900 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
               <h3 className="text-lg font-bold dark:text-white">
-                {messageOptions?.accessType 
+                {messageOptions?.isApproval && messageOptions?.accessType === 'fabrication_guide'
+                  ? (language === 'ko' ? '제작가이드 요청 승인' : 'Approve Guide Request')
+                  : messageOptions?.isApproval && messageOptions?.accessType
                   ? (language === 'ko' ? '도면/모델 요청 승인' : 'Approve Request')
+                  : messageOptions?.accessType === 'fabrication_guide'
+                  ? (language === 'ko' ? '제작가이드 요청' : 'Request Fabrication Guide')
                   : (language === 'ko' ? `${messageTarget.name}님에게 메시지` : `Message to ${messageTarget.name}`)}
               </h3>
               <button onClick={() => setShowMessageModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <div className="p-6">
+              {receivedMessage && (
+                <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-2xl">
+                  <p className="text-xs font-medium text-blue-500 dark:text-blue-400 mb-1.5 flex items-center gap-1">
+                    <span className="material-icons-round text-sm">mail</span>
+                    {language === 'ko' ? `${messageTarget.name}님의 메시지` : `Message from ${messageTarget.name}`}
+                  </p>
+                  <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">{receivedMessage}</p>
+                </div>
+              )}
               {messageOptions?.relatedProjectTitle && (
                 <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center gap-3">
                   <span className="text-lg">📦</span>

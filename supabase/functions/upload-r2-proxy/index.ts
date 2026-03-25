@@ -83,7 +83,8 @@ async function generatePresignedUrl(
   const sortedParams = new URLSearchParams([...queryParams.entries()].sort());
   const canonicalQueryString = sortedParams.toString();
 
-  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
+  const lowerContentType = contentType.toLowerCase().trim();
+  const canonicalHeaders = `content-type:${lowerContentType}\nhost:${host}\n`;
   const signedHeaders = "content-type;host";
 
   const canonicalRequest = [
@@ -190,8 +191,10 @@ serve(async (req) => {
       }
 
       if (!r2Response.ok) {
+        const errorBody = await r2Response.text();
+        console.error(`R2 Error (${r2Response.status}):`, errorBody);
         throw new Error(
-          `[ERR_R2_UPLOAD] Proxy upload failed: ${r2Response.statusText}`,
+          `[ERR_R2_UPLOAD] R2 rejected the upload (${r2Response.status}). Details: ${errorBody.substring(0, 200)}`,
         );
       }
 

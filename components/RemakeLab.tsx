@@ -368,10 +368,10 @@ const RemakeLab: React.FC<RemakeLabProps> = ({ language, userTokens, setUserToke
             titleEn: 'Cardboard Musician',
             subtitle: '폐자재에 리듬을 입히다',
             subtitleEn: 'Giving Rhythm to Waste',
-            description: '버려지는 골판지를 활용한 악기와 뮤지션 캐릭터를 디자인합니다.',
-            descriptionEn: 'Design musical instruments and characters using recycled cardboard.',
-            cta: '캐릭터 만들기',
-            ctaEn: 'Create Character',
+            description: '버려지는 골판지로 만든 화면 속 악기를 직접 연주해 보세요.',
+            descriptionEn: 'Play the virtual instrument made from recycled cardboard.',
+            cta: '연주하기',
+            ctaEn: 'Play Now',
             image: '/images/cardboard_musician.png',
             tool: 'musician' as ActiveTool,
         },
@@ -401,7 +401,7 @@ const RemakeLab: React.FC<RemakeLabProps> = ({ language, userTokens, setUserToke
 
     const labTools = [
         { id: 'basalt', title: '현무암 패턴 생성기', titleEn: 'Basalt Pattern Gen', description: '제주 현무암의 독특한 기공 패턴을 AI로 생성합니다.', descriptionEn: 'Generate unique Jeju basalt pore patterns using AI.', image: '/images/basalt_pattern.png', category: ['ai', 'experimental'], tool: 'basalt' as ActiveTool, cost: 10 },
-        { id: 'musician', title: '골판지 뮤지션', titleEn: 'Cardboard Musician', description: '버려진 골판지로 악기 연주 캐릭터를 디자인합니다.', descriptionEn: 'Design playable instrument characters using recycled cardboard.', image: '/images/cardboard_musician.png', category: ['experimental', 'laser', 'multi-color'], tool: 'musician' as ActiveTool, cost: 10 },
+        { id: 'musician', title: '골판지 뮤지션', titleEn: 'Cardboard Musician', description: '버려진 골판지로 만든 화면 속 악기를 직접 연주해 보세요.', descriptionEn: 'Play the virtual instrument made from recycled cardboard.', image: '/images/cardboard_musician.png', category: ['experimental', 'laser', 'multi-color'], tool: 'musician' as ActiveTool, cost: 0 },
         { id: 'blueprint', title: '도면 만들기', titleEn: 'Blueprint Creator', description: '이미지나 설명으로 정밀한 2D 제작 도면을 생성합니다.', descriptionEn: 'Create precise 2D blueprints from images or descriptions.', image: '/images/blueprint_creator.png', category: ['laser', 'ai', 'single-color'], tool: 'blueprint' as ActiveTool, cost: 15 },
     ];
 
@@ -442,7 +442,13 @@ const RemakeLab: React.FC<RemakeLabProps> = ({ language, userTokens, setUserToke
                                     {language === 'ko' ? slide.description : slide.descriptionEn}
                                 </p>
                                 <button
-                                    onClick={() => setActiveTool(slide.tool)}
+                                    onClick={() => {
+                                        if (slide.tool === 'musician') {
+                                            window.open('https://faa08ec7.music-test-5ma.pages.dev', '_blank');
+                                        } else {
+                                            setActiveTool(slide.tool);
+                                        }
+                                    }}
                                     className="bg-white text-black hover:bg-gray-100 font-semibold py-3 px-6 rounded-lg flex items-center gap-2 transition group shadow-lg"
                                 >
                                     <span className="text-emerald-500 font-bold mr-1 flex items-center text-sm gap-0.5">
@@ -493,7 +499,13 @@ const RemakeLab: React.FC<RemakeLabProps> = ({ language, userTokens, setUserToke
                         <div
                             key={tool.id}
                             className="group bg-white dark:bg-[#1E293B] border border-gray-100 dark:border-gray-800 rounded-3xl overflow-hidden hover:shadow-2xl dark:hover:shadow-black/60 transition-all duration-500 flex flex-col w-full md:w-[calc(50%-1rem)] lg:w-[calc(33.333%-2rem)] min-w-[300px] max-w-[400px] relative cursor-pointer"
-                            onClick={() => setActiveTool(tool.tool)}
+                            onClick={() => {
+                                if (tool.tool === 'musician') {
+                                    window.open('https://faa08ec7.music-test-5ma.pages.dev', '_blank');
+                                } else {
+                                    setActiveTool(tool.tool);
+                                }
+                            }}
                         >
                             <div className="absolute top-3 left-3 z-10 bg-[#4ADE80] text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">NEW</div>
                             <div className="h-48 overflow-hidden relative bg-gray-50 dark:bg-gray-800">

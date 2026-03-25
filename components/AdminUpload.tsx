@@ -293,6 +293,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   const [formData, setFormData] = useState({
     title: '',
     material: 'Old Denim Jeans',
+    materialSpec: '',
     materialQty: '1',
     materialUnit: 'kg',
     sourceLocation: '',
@@ -333,6 +334,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         setFormData({
             title: initialProject.title || '',
             material: resolveMaterialValue(initialProject.material || (initialProject.metadata as any)?.material || ''),
+            materialSpec: (initialProject.metadata as any)?.material_spec || '',
             materialQty: (initialProject.metadata as any)?.material_qty || '1',
             materialUnit: (initialProject.metadata as any)?.material_unit || 'ea',
             sourceLocation: (initialProject.metadata as any)?.source_location || '',
@@ -365,28 +367,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
     }
   }, [initialProject, user]);
 
-  const handleVerifyEco = async () => {
-    if (!formData.title || !formData.material || !formData.steps[0].desc) {
-      showToast("분석을 위해 프로젝트 제목, 재료, 그리고 최소 1개의 제작 단계를 입력해주세요.", 'warning');
-      return;
-    }
-    setIsVerifying(true);
-    try {
-      const result = await verifyEcoScore({
-        title: formData.title,
-        material: formData.material,
-        qty: `${formData.materialQty}${formData.materialUnit}`,
-        location: formData.sourceLocation || 'Unknown',
-        steps: formData.steps
-      });
-      setEcoValidation(result);
-    } catch (e) {
-      console.error(e);
-      showToast("분석 중 오류가 발생했습니다.", 'error');
-    } finally {
-      setIsVerifying(false);
-    }
-  };
+
 
   useEffect(() => {
     if (checkR2Config()) setIsR2Configured(true);
@@ -503,6 +484,37 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (imageFiles.length === 0 && existingImages.length === 0) { showToast(t.visuals.selectImage, 'warning'); return; }
+    
+    if (!formData.title || !formData.material || !formData.steps[0].desc) {
+      showToast("분석을 위해 프로젝트 제목, 재료, 그리고 최소 1개의 제작 단계를 입력해주세요.", 'warning');
+      return;
+    }
+
+    if (!['Easy', 'Medium', 'Hard'].includes(formData.difficulty)) {
+      showToast("난이도를 설정해주세요 (Easy, Medium, Hard 중 택 1).", 'warning');
+      return;
+    }
+    
+    setIsVerifying(true);
+    let finalEcoValidation = ecoValidation;
+    try {
+      finalEcoValidation = await verifyEcoScore({
+        title: formData.title,
+        material: formData.material,
+        spec: formData.materialSpec,
+        qty: `${formData.materialQty}${formData.materialUnit}`,
+        location: formData.sourceLocation || 'Unknown',
+        steps: formData.steps
+      });
+      setEcoValidation(finalEcoValidation);
+    } catch (error) {
+      console.error(error);
+      showToast("분석 중 오류가 발생했습니다.", 'error');
+      setIsVerifying(false);
+      return;
+    }
+    setIsVerifying(false);
+
     setLoading(true);
     try {
       const uploadedImageUrls: string[] = [];
@@ -525,7 +537,10 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
 
       const processedSteps = await Promise.all(formData.steps.map(async (step) => {
         let finalStepImageUrl = step.imageUrl;
-        if (step.imageFile) finalStepImageUrl = await uploadToR2(step.imageFile, 'steps');
+        if (step.imageFile) {
+          const optimizedStepFile = await optimizeImage(step.imageFile);
+          finalStepImageUrl = await uploadToR2(optimizedStepFile, 'steps');
+        }
         return { title: step.title, desc: step.desc, tip: step.tip, imageUrl: finalStepImageUrl };
       }));
 
@@ -536,9 +551,9 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
         metadata: {
           ...(initialProject?.metadata as any || {}), fabrication_guide: processedSteps, model_files: allModelFiles,
           download_url: allModelFiles.length > 0 ? allModelFiles[0].url : '', images: savedMainImages,
-          tools: formData.tools, material_qty: formData.materialQty, material_unit: formData.materialUnit,
+          tools: formData.tools, material_spec: formData.materialSpec, material_qty: formData.materialQty, material_unit: formData.materialUnit,
           source_location: formData.sourceLocation, processing_method: formData.processingMethod,
-          eco_validation: ecoValidation, eco_score: ecoValidation?.recalculated_eco_score || formData.co2,
+          eco_validation: finalEcoValidation, eco_score: finalEcoValidation?.recalculated_eco_score || formData.co2,
           maker_name: userNickname || 'Maker'
         }
       };
@@ -594,8 +609,10 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
           </div>
           {activeTab === 'upload' && (
             <div className="flex gap-3 items-center">
-              <button onClick={handleVerifyEco} disabled={isVerifying} className="px-4 py-2.5 rounded-full bg-white text-slate-700 border flex items-center gap-2 hover:bg-slate-50">{isVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-yellow-400" />}{isVerifying ? '분석 중...' : 'AI 가치 분석'}</button>
-              <button onClick={handleUpload} disabled={loading} className="px-6 py-2.5 rounded-full bg-[#10b77f] text-white font-medium text-sm flex items-center gap-2 shadow-lg shadow-[#10b77f]/30 hover:shadow-[#10b77f]/50">{loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}{loading ? t.header.publishing : t.header.publish}</button>
+              <button onClick={handleUpload} disabled={loading || isVerifying} className="px-6 py-2.5 rounded-full bg-[#10b77f] text-white font-medium text-sm flex items-center gap-2 shadow-lg shadow-[#10b77f]/30 hover:shadow-[#10b77f]/50">
+                {(loading || isVerifying) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isVerifying ? 'AI 가치분석 중...' : (loading ? t.header.publishing : t.header.publish)}
+              </button>
             </div>
           )}
         </header>
@@ -620,15 +637,17 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                 <section className="mb-10 animate-fade-in-up">
                   <div className="flex items-center gap-2 mb-4 px-2"><Recycle className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">2. Material & Eco Data</h3></div>
                   <div className="bg-white dark:bg-[#152e25]/60 p-8 rounded-[2rem] border border-gray-100 dark:border-white/5 space-y-6">
-                     <div className="flex flex-col gap-4">
-                       <label className="text-sm font-semibold ml-2">{t.basicInfo.material}</label>
-                       <div className="flex flex-col md:flex-row gap-4">
-                         <div className="flex-[2]"><select value={formData.material} onChange={handleMaterialChange} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4">{MATERIAL_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{t_dropdown.materials[opt.value as keyof typeof t_dropdown.materials] || opt.label}</option>)}</select></div>
-                         <div className="flex-1 flex gap-2"><input type="number" value={formData.materialQty} onChange={(e) => setFormData({ ...formData, materialQty: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4 text-center font-bold" /><select value={formData.materialUnit} onChange={(e) => setFormData({ ...formData, materialUnit: e.target.value })} className="w-24 bg-slate-50 dark:bg-black/30 rounded-full px-2"><option>kg</option><option>g</option><option>ea</option></select></div>
-                       </div>
-                       <label className="text-sm font-semibold ml-2 mt-2">수거처 (Source Location)</label>
-                       <input type="text" placeholder={t_dropdown.sourcePlaceholder} value={formData.sourceLocation} onChange={(e) => setFormData({ ...formData, sourceLocation: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4" />
-                     </div>
+                    <div className="flex flex-col gap-4">
+                      <label className="text-sm font-semibold ml-2">{t.basicInfo.material}</label>
+                      <div className="flex flex-col md:flex-row gap-4">
+                        <div className="flex-[2]"><select value={formData.material} onChange={handleMaterialChange} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4">{MATERIAL_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{t_dropdown.materials[opt.value as keyof typeof t_dropdown.materials] || opt.label}</option>)}</select></div>
+                        <div className="flex-1 flex gap-2"><input type="number" value={formData.materialQty} onChange={(e) => setFormData({ ...formData, materialQty: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4 text-center font-bold" /><select value={formData.materialUnit} onChange={(e) => setFormData({ ...formData, materialUnit: e.target.value })} className="w-24 bg-slate-50 dark:bg-black/30 rounded-full px-2"><option>kg</option><option>g</option><option>ea</option></select></div>
+                      </div>
+                      <label className="text-sm font-semibold ml-2 mt-2">세부 규격 (크기/용량)</label>
+                      <input type="text" placeholder="예: 500ml, 2L, 소형박스 (선택 사항)" value={formData.materialSpec} onChange={(e) => setFormData({ ...formData, materialSpec: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4" />
+                      <label className="text-sm font-semibold ml-2 mt-2">수거처 (Source Location)</label>
+                      <input type="text" placeholder={t_dropdown.sourcePlaceholder} value={formData.sourceLocation} onChange={(e) => setFormData({ ...formData, sourceLocation: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4" />
+                    </div>
                   </div>
                 </section>
               )}
@@ -639,7 +658,7 @@ const AdminUpload: React.FC<AdminUploadProps> = ({ supabase, onBack, onUploadCom
                   <div className="flex items-center gap-2 mb-4 px-2"><Hammer className="w-5 h-5 text-[#10b77f]" /><h3 className="text-lg font-bold text-slate-800 dark:text-white">3. Fabrication Process</h3></div>
                   <div className="bg-white dark:bg-[#152e25]/60 p-8 rounded-[2rem] border border-gray-100 dark:border-white/5 space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="flex flex-col gap-2"><label className="text-sm font-semibold ml-2">{t.basicInfo.tools}</label><div className="w-full bg-slate-50 dark:bg-black/30 rounded-[2rem] px-6 py-4 flex flex-wrap gap-2 items-center min-h-[56px]">{formData.tools.split(',').filter(t => t.trim() !== '').map((tool, idx) => (<span key={idx} className="bg-white dark:bg-white/10 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1">{tool.trim()}<button onClick={() => { const newTools = formData.tools.split(',').filter((_, i) => i !== idx).join(','); setFormData({ ...formData, tools: newTools }); }}><X className="w-3 h-3" /></button></span>))}<input type="text" className="bg-transparent outline-none flex-1 min-w-[120px]" placeholder={formData.tools ? "" : t.basicInfo.toolsPlaceholder} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const val = e.currentTarget.value.trim(); if (val) { const current = formData.tools ? formData.tools.split(',') : []; if (!current.includes(val)) setFormData({ ...formData, tools: [...current, val].join(',') }); e.currentTarget.value = ''; } } }} /></div></div>
+                      <div className="flex flex-col gap-2"><label className="text-sm font-semibold ml-2">{t.basicInfo.tools}</label><div className="w-full bg-slate-50 dark:bg-black/30 rounded-[2rem] px-6 py-4 flex flex-wrap gap-2 items-center min-h-[56px]">{formData.tools.split(',').filter(t => t.trim() !== '').map((tool, idx) => (<span key={idx} className="bg-white dark:bg-white/10 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1">{tool.trim()}<button onClick={() => { const newTools = formData.tools.split(',').filter((_, i) => i !== idx).join(','); setFormData({ ...formData, tools: newTools }); }}><X className="w-3 h-3" /></button></span>))}<input type="text" className="bg-transparent outline-none flex-1 min-w-[120px]" placeholder={formData.tools ? "" : `${t.basicInfo.toolsPlaceholder} (입력 후 엔터를 눌러주세요)`} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const val = e.currentTarget.value.trim(); if (val) { const current = formData.tools ? formData.tools.split(',') : []; if (!current.includes(val)) setFormData({ ...formData, tools: [...current, val].join(',') }); e.currentTarget.value = ''; } } }} /></div></div>
                       <div className="flex flex-col gap-2"><label className="text-sm font-semibold ml-2">가공 방식</label><select value={formData.processingMethod} onChange={(e) => setFormData({ ...formData, processingMethod: e.target.value })} className="w-full bg-slate-50 dark:bg-black/30 rounded-full px-6 py-4">{Object.entries(t_dropdown.processing).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}</select></div>
                     </div>
                   </div>

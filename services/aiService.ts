@@ -306,6 +306,7 @@ export const generateFabricationGuide = async (
 export const verifyEcoScore = async (data: {
     title: string;
     material: string;
+    spec?: string;
     qty: string;
     location: string;
     steps: any[];
@@ -317,6 +318,7 @@ export const verifyEcoScore = async (data: {
     [Input Data]
     - Project: ${data.title}
     - Primary Material: ${data.material}
+    - Detailed Specification (Size/Volume): ${data.spec || 'Not provided'}
     - Quantity Declared: ${data.qty}
     - Source Location: ${data.location}
 
@@ -325,19 +327,21 @@ export const verifyEcoScore = async (data: {
 
     ## Assessment Protocol:
     1. **Carbon Calculation** (Scope 3 — Avoided Emissions Model):
-       Use standard emission factors:
-       - HDPE: 0.004 kgCO2eq/ea (avoided vs virgin production)
-       - PET: 0.050 kgCO2eq/ea
-       - Cardboard/Paper Pulp: 0.850 kgCO2eq/kg
-       - Wood waste: 0.450 kgCO2eq/kg
-       - Mixed plastic: 0.030 kgCO2eq/ea
-       - Glass: 1.200 kgCO2eq/kg
-       - Textile waste: 0.600 kgCO2eq/kg
+       - DO NOT blindly multiply quantity by a static unit factor.
+       - Use "Detailed Specification (Size/Volume)" (e.g., 500ml, 2L, Large Box) and "Primary Material" to accurately estimate the physical weight of 1 unit in kg.
+       - If no spec is provided, use typical industry averages depending on the material.
+       - Once total weight in kg is estimated (Weight per unit × Qty), multiply it by the kgCO2eq/kg standard emission factors below:
+         * PET / Mixed plastic: ~2.500 kgCO2eq/kg
+         * HDPE: ~3.000 kgCO2eq/kg
+         * Cardboard/Paper Pulp: 0.850 kgCO2eq/kg
+         * Wood waste: 0.450 kgCO2eq/kg
+         * Glass: 1.200 kgCO2eq/kg
+         * Textile waste: 0.600 kgCO2eq/kg
        CRITICAL: Result MUST be > 0. If calculation yields 0, apply a floor minimum of 0.1 kgCO2eq.
-       Formula: Qty × Emission Factor.
+       Formula: Estimated Total Weight (kg) × Emission Factor.
 
     2. **Data Reliability Index** (1-10):
-       Score based on: source traceability (+3 if Jeju location specified), quantity precision (+2 if unit provided), process completeness (+2 if >3 steps), material identification clarity (+3).
+       Score based on: source traceability (+3 if Jeju location specified), specification precision (+2 if detailed spec provided), process completeness (+2 if >3 steps), material identification clarity (+3).
 
     3. **Eco Grade Assignment**:
        - A: >1.0 kgCO2eq saved AND reliability >= 7

@@ -226,7 +226,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     setEditTitle(project?.title || '');
     setEditDescription(meta.description || project?.description || '');
     const steps = meta.fabrication_guide || project?.steps || [];
-    setEditSteps(steps.map((s: any) => ({ title: s.title || '', desc: s.desc || s.description || s.content || s.instructions || '', tip: s.tip || '' })));
+    setEditSteps(steps.map((s: any) => ({ title: s.title || '', desc: s.desc || s.description || s.content || s.instructions || '', tip: s.tip || '', imageUrl: s.imageUrl || '' })));
     const imgs = meta.images || project?.images || [];
     setEditImages({
       conceptImages: imgs.length > 0 ? [...imgs] : [project?.image || ''],
@@ -456,6 +456,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               let dbHasDetailed = false;
               let dbHasMechanical = false;
               let dbHas3D = false;
+              let dbHasGuide = false;
 
               if (!currentIsOwner && !isSuperAdmin && user?.id) {
                 try {
@@ -468,6 +469,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                       dbHasDetailed = grantData.some(g => g.access_type === 'blueprint_detailed' || g.access_type === 'blueprint');
                       dbHasMechanical = grantData.some(g => g.access_type === 'blueprint_mechanical' || g.access_type === 'blueprint');
                       dbHas3D = grantData.some(g => g.access_type === '3d_model');
+                      dbHasGuide = grantData.some(g => g.access_type === 'fabrication_guide');
                   }
                 } catch (err) {
                    console.error("Access verification failed", err);
@@ -476,7 +478,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               const finalDetailed = currentIsOwner || !!isSuperAdmin || dbHasDetailed;
               const finalMechanical = currentIsOwner || !!isSuperAdmin || dbHasMechanical;
               const final3D = currentIsOwner || !!isSuperAdmin || dbHas3D;
-              const finalGuide = currentIsOwner || !!isSuperAdmin; 
+              const finalGuide = currentIsOwner || !!isSuperAdmin || dbHasGuide;
 
               setHasDetailedAccess(finalDetailed);
               setHasMechanicalAccess(finalMechanical);
@@ -1273,8 +1275,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                   </div>
                 ))}
 
-                {/* 2. Detailed Blueprint */}
-                {(user && (user.id === project?.ownerId || hasDetailedAccess)) ? (
+                {/* 2. Detailed Blueprint - AI 프로젝트에만 표시 */}
+                {isAiProject && (user && (user.id === project?.ownerId || hasDetailedAccess)) ? (
                   additionalBlueprints.detailed || (isEditMode && editImages.detailed) ? (
                     <div className="relative w-24 h-24 flex-shrink-0">
                       <button
@@ -1337,7 +1339,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                     )
                   )
                 ) : (
-                  (user && user.id !== project?.ownerId && !hasDetailedAccess && (syncedMetadata?.additional_blueprints?.detailed || (project as any)?.metadata?.additional_blueprints?.detailed)) && (
+                  (isAiProject && user && user.id !== project?.ownerId && !hasDetailedAccess && (syncedMetadata?.additional_blueprints?.detailed || (project as any)?.metadata?.additional_blueprints?.detailed)) && (
                     <button
                       onClick={() => {
                           if (onMessageClick && project) {
@@ -1362,8 +1364,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                   )
                 )}
 
-                {/* 3. Mechanical Blueprint */}
-                {(user && (user.id === project?.ownerId || hasMechanicalAccess)) ? (
+                {/* 3. Mechanical Blueprint - AI 프로젝트에만 표시 */}
+                {isAiProject && (user && (user.id === project?.ownerId || hasMechanicalAccess)) ? (
                   additionalBlueprints.mechanical || (isEditMode && editImages.mechanical) ? (
                     <div className="relative w-24 h-24 flex-shrink-0">
                       <button
@@ -1426,7 +1428,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                     )
                   )
                 ) : (
-                  (user && user.id !== project?.ownerId && !hasMechanicalAccess && (syncedMetadata?.additional_blueprints?.mechanical || (project as any)?.metadata?.additional_blueprints?.mechanical)) && (
+                  (isAiProject && user && user.id !== project?.ownerId && !hasMechanicalAccess && (syncedMetadata?.additional_blueprints?.mechanical || (project as any)?.metadata?.additional_blueprints?.mechanical)) && (
                     <button
                       onClick={() => {
                           if (onMessageClick && project) {
@@ -1907,6 +1909,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                             <img
                               src={(step as any).imageUrl}
                               alt={step.title}
+                              loading="lazy"
                               className="w-full h-auto object-contain transition-transform duration-500 hover:scale-105 cursor-zoom-in"
                               onClick={() => setFullScreenImage((step as any).imageUrl)}
                             />
@@ -1954,10 +1957,37 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                   : 'Due to accuracy verification and quality control of AI-generated guides, this section is only available to the creator.'}
               </p>
               <button
-                onClick={() => handleConnectMaker(true)}
-                className="px-6 py-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-gray-200 shadow-sm hover:shadow-md transition-all active:scale-95"
+                onClick={() => {
+                  if (!user) {
+                    onLoginClick('detail');
+                    return;
+                  }
+                  if (user.id === project?.ownerId) {
+                    showToast(language === 'ko' ? '자신의 프로젝트입니다.' : 'This is your own project.', 'info');
+                    return;
+                  }
+                  if (onMessageClick && project) {
+                    const maker = {
+                      name: project.maker,
+                      avatar: project.makerAvatarUrl || '',
+                      userId: project.ownerId || '',
+                      projects: 0,
+                      likes: '',
+                      rawLikes: 0,
+                    };
+                    const templateText = language === 'ko'
+                      ? `[제작가이드 요청] 안녕하세요! "${project.title}" 프로젝트의 제작가이드 접근 권한을 요청합니다.`
+                      : `[Guide Request] Hello! I would like to request access to the fabrication guide for "${project.title}".`;
+                    onMessageClick(maker, templateText, {
+                      relatedProjectId: project.id,
+                      relatedProjectTitle: project.title,
+                      accessType: 'fabrication_guide'
+                    });
+                  }
+                }}
+                className="px-6 py-3 bg-amber-500 hover:bg-amber-600 rounded-xl text-sm font-bold text-white shadow-lg shadow-amber-500/20 hover:shadow-xl transition-all active:scale-95"
               >
-                {language === 'ko' ? '제작자에게 문의하기' : 'Contact Maker'}
+                {language === 'ko' ? '제작가이드 요청하기' : 'Request Fabrication Guide'}
               </button>
             </div>
           )}
