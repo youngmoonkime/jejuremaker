@@ -4,6 +4,7 @@ import { Maker, Project } from '../types';
 import { ViewState } from '../App';
 import { Language } from '../contexts/ThemeContext';
 import { config } from '../services/config';
+import PolicyModal, { PolicyType } from './PolicyModal';
 
 interface SidebarProps {
     language: Language;
@@ -66,6 +67,13 @@ const Sidebar: React.FC<SidebarProps> = ({
     isSuperAdmin 
 }) => {
     const t = TRANSLATIONS[language];
+
+    const [policyModalType, setPolicyModalType] = React.useState<PolicyType | null>(null);
+
+    const handlePolicyClick = (e: React.MouseEvent, type: PolicyType) => {
+        e.preventDefault();
+        setPolicyModalType(type);
+    };
 
     // Raw Values for Animation
     const stats = challengeStats;
@@ -349,16 +357,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {/* Footer Links */}
                 <div className="flex flex-col gap-1 px-1">
                     <div className="flex gap-4 text-[12px] font-bold text-gray-500 dark:text-gray-400">
-                        <a href="#" className="hover:text-primary transition-colors">개인정보 처리방침</a>
-                        <a href="#" className="hover:text-primary transition-colors">이용 약관</a>
+                        <a href="#" onClick={(e) => handlePolicyClick(e, 'privacy')} className="hover:text-primary transition-colors">개인정보 처리방침</a>
+                        <a href="#" onClick={(e) => handlePolicyClick(e, 'terms')} className="hover:text-primary transition-colors">이용 약관</a>
                     </div>
                     <div className="flex gap-4 text-[12px] font-bold text-gray-500 dark:text-gray-400">
-                        <a href="#" className="hover:text-primary transition-colors">커뮤니티 가이드라인</a>
-                        <a href="#" className="hover:text-primary transition-colors">인기 검색어</a>
+                        <a href="#" onClick={(e) => handlePolicyClick(e, 'guidelines')} className="hover:text-primary transition-colors">커뮤니티 가이드라인</a>
+                        <a href="#" onClick={(e) => handlePolicyClick(e, 'search')} className="hover:text-primary transition-colors">인기 검색어</a>
                     </div>
                     <div className="flex gap-4 text-[12px] font-bold text-gray-500 dark:text-gray-400">
-                        <a href="#" className="hover:text-primary transition-colors">자주 묻는 질문</a>
-                        <a href="#" className="hover:text-primary transition-colors">쿠키 설정</a>
+                        <a href="#" onClick={(e) => handlePolicyClick(e, 'faq')} className="hover:text-primary transition-colors">자주 묻는 질문</a>
+                        <a href="#" onClick={(e) => handlePolicyClick(e, 'cookies')} className="hover:text-primary transition-colors">쿠키 설정</a>
                     </div>
                 </div>
 
@@ -374,6 +382,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </p>
                 </div>
             </div>
+
+            <PolicyModal 
+                isOpen={!!policyModalType}
+                onClose={() => setPolicyModalType(null)}
+                type={policyModalType}
+                language={language}
+            />
         </aside>
     );
 };

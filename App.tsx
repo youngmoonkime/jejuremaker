@@ -275,7 +275,7 @@ const App: React.FC = () => {
 
   const handleApproveRequest = async () => {
       if (!messageTarget || !user || !messageOptions?.accessType || !messageOptions?.relatedProjectId) return;
-      
+
       try {
           // 1. Grant Access via RPC
           const { error: grantError } = await supabase.rpc('grant_blueprint_access', {
@@ -290,10 +290,42 @@ const App: React.FC = () => {
               return;
           }
 
-          // 2. Send Confirmation Message
-          await handleSendMessage();
-          
-          showToast(language === 'ko' ? '승인 및 메시지 전송이 완료되었습니다.' : 'Approval and confirmation message sent!', 'success');
+          // 2. 승인 메시지가 비어있으면 자동 생성
+          const approvalText = messageText.trim() || (
+              language === 'ko'
+                  ? `[승인 완료] "${messageOptions.relatedProjectTitle || '프로젝트'}"의 ${messageOptions.accessType === 'fabrication_guide' ? '제작가이드' : '도면/모델'} 접근이 승인되었습니다.`
+                  : `[Approved] Access to ${messageOptions.accessType === 'fabrication_guide' ? 'fabrication guide' : 'blueprint/model'} for "${messageOptions.relatedProjectTitle || 'project'}" has been approved.`
+          );
+
+          // 3. 승인 확인 메시지 전송
+          const receiverId = (messageTarget as any).userId;
+          const isValidUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+          const pid = messageOptions.relatedProjectId;
+          const finalProjectId = (pid && isValidUuid(pid)) ? pid : null;
+
+          const { error: msgError } = await supabase.from('direct_messages').insert({
+              sender_id: user.id,
+              receiver_id: receiverId,
+              content: approvalText,
+              project_id: finalProjectId,
+              metadata: {
+                  projectTitle: messageOptions.relatedProjectTitle,
+                  accessType: messageOptions.accessType,
+                  relatedProjectId: messageOptions.relatedProjectId,
+                  type: 'access_approved'
+              }
+          });
+
+          if (msgError) {
+              console.error("Approval message send error:", msgError);
+              // 권한은 이미 부여됨 - 메시지 실패해도 모달 닫기
+          }
+
+          // 4. 모달 닫기 및 상태 초기화
+          setShowMessageModal(false);
+          setMessageText('');
+          setMessageOptions(null);
+          showToast(language === 'ko' ? '승인 완료! 요청자에게 알림이 전송되었습니다.' : 'Approved! Notification sent to requester.', 'success');
       } catch (err: any) {
           console.error("Failed to approve request", err);
           showToast(language === 'ko' ? `오류가 발생했습니다: ${err.message}` : `An error occurred: ${err.message}`, 'error');
@@ -391,7 +423,25 @@ const App: React.FC = () => {
   // =========================================================================
   const handleSelectNotification = (notif: any) => {
     handleNotificationClick(notif, () => {
-      // Priority: Check if it's a blueprint/model access request or approval confirmation
+      // --- New Priority 1: Check if it's a workspace chat notification (Regular DM in Workspace) ---
+      const workspaceChatType = notif.metadata?.type === 'workspace_chat';
+      if (workspaceChatType) {
+        const targetProjectId = notif.relatedProjectId || notif.projectId;
+        if (targetProjectId && targetProjectId !== 'direct_message') {
+          const targetProj = projects.find(p => String(p.id) === String(targetProjectId)) ||
+                           myProjects.find(p => String(p.id) === String(targetProjectId));
+
+          if (targetProj) {
+            setProjectToEdit(targetProj);
+            setWorkspaceInitialMode('human');
+            setWorkspaceSelectedPeerId(notif.senderUserId || notif.sender_id);
+            setCurrentView('workspace');
+            return;
+          }
+        }
+      }
+
+      // Priority 2: Check if it's a blueprint/model access request or approval confirmation
       const accessType = notif.metadata?.accessType || notif.accessType;
       const isApproval = notif.metadata?.type === 'access_approved' || notif.metadata?.isApproval;
 
@@ -399,7 +449,7 @@ const App: React.FC = () => {
         handleOpenMessageModal({
           name: notif.sender,
           avatar: notif.senderAvatar,
-          userId: notif.senderUserId,
+          userId: notif.senderUserId || notif.sender_id,
           projects: 0,
           likes: '0'
         }, '', {
@@ -411,16 +461,15 @@ const App: React.FC = () => {
       }
 
       if (accessType && !isApproval) {
-        const approvalMsg = accessType === 'fabrication_guide'
-          ? (language === 'ko' ? '제작가이드 요청을 승인했습니다. 이제 프로젝트에서 확인하실 수 있습니다.' : 'I have approved your fabrication guide request. You can now view it in the project.')
-          : (language === 'ko' ? '도면 요청을 승인했습니다. 이제 프로젝트에서 확인하실 수 있습니다.' : 'I have approved your request. You can now view it in the project.');
+        // --- SAFE: Modal is opened BLANK by default even for requests, or with a very clear non-sending title ---
+        // Pre-filling approval message was causing accidental sends in place of regular chat.
         handleOpenMessageModal({
           name: notif.sender,
           avatar: notif.senderAvatar,
-          userId: notif.senderUserId,
+          userId: notif.senderUserId || notif.sender_id,
           projects: 0,
           likes: '0'
-        }, approvalMsg, {
+        }, '', { // Changed from approvalMsg to '' to prevent unintended sending
           relatedProjectId: notif.relatedProjectId || notif.projectId,
           relatedProjectTitle: notif.projectTitle,
           accessType: accessType,
@@ -430,32 +479,15 @@ const App: React.FC = () => {
         return;
       }
 
-      // Check if it's a workspace chat notification (명시적으로 workspace_chat 타입인 경우만)
-      if (notif.metadata?.type === 'workspace_chat') {
-        const targetProjectId = notif.relatedProjectId || notif.projectId;
-        if (targetProjectId && targetProjectId !== 'direct_message') {
-          const targetProj = projects.find(p => String(p.id) === String(targetProjectId)) ||
-                           myProjects.find(p => String(p.id) === String(targetProjectId));
-
-          if (targetProj) {
-            setProjectToEdit(targetProj);
-            setWorkspaceInitialMode('human');
-            setWorkspaceSelectedPeerId(notif.senderUserId);
-            setCurrentView('workspace');
-            return;
-          }
-        }
-      }
-
       // Default: Open message modal for reply (원본 메시지 포함)
       handleOpenMessageModal({
         name: notif.sender,
         avatar: notif.senderAvatar,
-        userId: notif.senderUserId,
+        userId: notif.senderUserId || notif.sender_id,
         projects: 0,
         likes: '0'
       }, '', {
-        relatedProjectId: notif.relatedProjectId,
+        relatedProjectId: notif.relatedProjectId || notif.projectId,
         relatedProjectTitle: notif.projectTitle,
         accessType: notif.accessType,
         receivedMessage: notif.message
@@ -763,6 +795,10 @@ const App: React.FC = () => {
                handleLoginClick(view);
                return;
              }
+          }
+          // 업로드 페이지로 새로 진입 시 이전 편집 데이터 초기화
+          if (view === 'upload') {
+            setProjectToEdit(null);
           }
           setCurrentView(view);
           setSelectedProject(null);

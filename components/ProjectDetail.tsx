@@ -180,7 +180,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
 
   // State for Additional Blueprints
   const [generatingBlueprint, setGeneratingBlueprint] = useState<'detailed' | 'mechanical' | null>(null);
-  const [additionalBlueprints, setAdditionalBlueprints] = useState<{ detailed?: string; mechanical?: string }>({});
+  const [additionalBlueprints, setAdditionalBlueprints] = useState<{ detailed?: string | null, mechanical?: string | null }>(
+    (project as any)?.metadata?.additional_blueprints || {}
+  );
 
   // Full Screen Image State
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
@@ -337,10 +339,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     setCopilotLoading(true);
 
     try {
-      // 1. Analyze Intent
+      // 1. Analyze Intent (프로젝트 전체 context 전달)
       const analysis = await aiService.analyzeCopilotIntent(
         msg, 
-        currentRecipe as any, 
+        project,   // currentRecipe 텍스트 대신 project 전체 객체 전달
         [], 
         null, 
         user?.user_metadata?.nickname || 'User', 
@@ -362,24 +364,35 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
       } else if (analysis.type === 'UPDATE_RECIPE') {
         if (analysis.recipe_update) {
           setCurrentRecipe(analysis.recipe_update);
-          console.log("Recipe Updated:", analysis.recipe_update);
         }
         setCopilotMessages(prev => [...prev, { role: 'assistant', content: analysis.message }]);
 
-      } else if (analysis.type === 'GENERATE') {
-        setCopilotMessages(prev => [...prev, { role: 'assistant', content: "네, 새로운 디자인으로 3D 모델 생성을 시작합니다.." }]);
+      } else if (analysis.type === 'IMAGE_GENERATION' || analysis.type === 'GENERATE') {
+        // 코파일럿은 3D 생성 없이, 모든 생성 요청을 컨셉 이미지로 처리
+        setCopilotMessages(prev => [...prev, { role: 'assistant', content: analysis.message || "네, 요청하신 디자인 변형 이미지를 생성할게요!" }]);
 
-        // 1. Call Tripo (aiService already generates and uploads to R2)
-        const r2Url = await aiService.generate3DModel(currentRecipe);
+        // enriched_prompt: AI가 분석한 풍부한 설명 우선, 없으면 사용자 원문 사용
+        const imagePrompt = analysis.enriched_prompt || msg;
+        const mainImageUrl = project?.images?.[0];
 
-        // 4. Update View
-        // Hack: Update syncedMetadata locally to force re-render of 3D Viewer
-        setSyncedMetadata({ ...syncedMetadata, model_3d_url: r2Url });
+        const generatedUrl = await aiService.generateUpcyclingImage(
+          imagePrompt,
+          undefined,
+          mainImageUrl,   // 메인 이미지를 형태 레퍼런스로 전달
+          false,
+          project as any,  // 기능 보존을 위한 프로젝트 컨텍스트 (title, category, fabricationGuide)
+        );
 
-        // 5. Success Message
-        setCopilotMessages(prev => [...prev, { role: 'assistant', content: "생성이 완료되었습니다! 화면을 확인해보세요." }]);
+        // 생성된 이미지를 채팅창 미리보기로 표시
+        setCopilotMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '새 디자인 안이 완성됐습니다! 아래에서 확인해보세요.',
+          type: 'preview',
+          meta: { imageUrl: generatedUrl },
+        }]);
+
       } else {
-        // CHAT
+        // GENERAL_CHAT
         setCopilotMessages(prev => [...prev, { role: 'assistant', content: analysis.message }]);
       }
 
@@ -434,8 +447,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
       // Fetch latest metadata to ensure 3D URL is up to date (sync with Wizard generation)
       const fetchLatestData = async () => {
         try {
-          // If the project ID is numeric (legacy), skip. If UUID, fetch.
-          if (typeof project.id === 'string' && project.id.includes('-')) {
+          if (typeof project.id === 'string' && !project.id.startsWith('static')) {
             const { data, error } = await supabase
               .from('items')
               .select('id, owner_id, metadata')

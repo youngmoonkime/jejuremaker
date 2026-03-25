@@ -169,7 +169,14 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
             
             if (error) throw error;
             if (data) {
-                const mapped = data.map((m: any) => ({
+                // 승인/요청 메시지는 실시간 채팅에서 제외 (별도 알림으로 처리됨)
+                const chatOnly = data.filter((m: any) => {
+                    const meta = m.metadata || {};
+                    if (meta.type === 'access_approved') return false;
+                    if (meta.accessType && meta.type !== 'workspace_chat') return false;
+                    return true;
+                });
+                const mapped = chatOnly.map((m: any) => ({
                     id: m.id,
                     role: m.sender_id === currentUserId ? 'user' : 'expert',
                     name: m.sender_id === currentUserId ? userNickname : selectedPeer.nickname,
@@ -193,6 +200,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
             filter: `receiver_id=eq.${currentUserId}` 
         }, (payload) => {
             if (payload.new.sender_id === selectedPeer.user_id) {
+                // 승인/요청 메시지는 채팅에 표시하지 않음
+                const meta = payload.new.metadata || {};
+                if (meta.type === 'access_approved') return;
+                if (meta.accessType && meta.type !== 'workspace_chat') return;
+
                 const newDM = {
                     id: payload.new.id,
                     role: 'expert',
@@ -445,11 +457,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
     }
     
     setIsLoading(true);
-
+    
     try {
       if (activeTab === 'EXPERT') {
         if (selectedPeer) {
-            // 1. Send as Direct Message (DM)
+            console.log(`Workspace: Sending DM to peer ${selectedPeer.user_id}: "${userMsg}"`);
             const { data: dmData, error: dmError } = await supabase
                 .from('direct_messages')
                 .insert({
@@ -527,24 +539,50 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
       } else {
         // Call AI Copilot (Functional / Node Gen)
-        
-        // Prepare context for Gemini 2.5 Flash
+
+        // Prepare context for Gemini
         const recentNodes = nodes.slice(-5).map(n => ({
             id: n.id,
             label: n.data.label as string,
             content: n.data.content as string
         }));
 
-        // --- 모든 로그인 사용자에게 코파일럿 전체 기능 허용 ---
         const hasDetailedAccess = true;
 
-        // 1. Analyze Intent (Pass User Nickname & Attached Image)
+        // 1. Analyze Intent via AI
         const analysis: any = await aiService.analyzeCopilotIntent(userMsg, project, recentNodes, taggedNodeId, userNickname, attachedImageBase64, hasDetailedAccess);
 
+        // --- 클라이언트 키워드 기반 타입 보정 (AI 결과를 덮어쓸 수 있음) ---
+        const IMAGE_KEYWORDS = /이미지|생성해|그려|렌더링|보여줘|비주얼|만들어줘|그려줘/;
+        const VIEW_KEYWORDS = /회전|확대|축소|와이어프레임|배경|돌려|줌/;
+        const MATERIAL_KEYWORDS = /재료|소재|재질|현무암|플라스틱|나무|금속|유리|돌|천|가죽|펄프/;
+
+        let resolvedType = analysis.type;
+
+        // 이미지 관련 키워드가 명시적으로 있으면 IMAGE_GENERATION으로 보정
+        if (IMAGE_KEYWORDS.test(userMsg)) {
+            resolvedType = 'IMAGE_GENERATION';
+        }
+        // 뷰 컨트롤 키워드가 있으면 VIEW_CONTROL로 보정
+        else if (VIEW_KEYWORDS.test(userMsg)) {
+            resolvedType = 'VIEW_CONTROL';
+        }
+        // 재료 키워드가 있으면 MATERIAL_CHANGE로 보정
+        else if (MATERIAL_KEYWORDS.test(userMsg)) {
+            resolvedType = 'MATERIAL_CHANGE';
+        }
+        // 디자인 관련이면 DESIGN_CHANGE
+        else if (/디자인|색상|스타일|모양|변경|수정|바꿔|형태|크기|두께/.test(userMsg)) {
+            resolvedType = 'DESIGN_CHANGE';
+        }
+
+        console.log("🤖 AI type:", analysis.type, "→ Resolved type:", resolvedType);
+
+        // 토큰 차감
         let requiredTokens = 0;
-        if (analysis.type === 'IMAGE_GENERATION') requiredTokens = 5;
-        if (analysis.type === 'GENERATE') requiredTokens = 30;
-        if (analysis.type === 'UPDATE_RECIPE') requiredTokens = 1;
+        if (resolvedType === 'IMAGE_GENERATION') requiredTokens = 5;
+        if (resolvedType === 'GENERATE') requiredTokens = 30;
+        if (resolvedType === 'UPDATE_RECIPE') requiredTokens = 1;
 
         if (requiredTokens > 0) {
            if (userTokens < requiredTokens) {
@@ -563,72 +601,105 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
            }
         }
 
-        if (copilotCancelRef.current) {
-            setIsLoading(false);
-            return;
-        }
+        if (copilotCancelRef.current) { setIsLoading(false); return; }
 
         let replyMessage = analysis.message;
         let generatedImageUrl = undefined;
 
-        // 2. Optional: Generate Image if Requested
-        if (analysis.type === 'IMAGE_GENERATION') {
+        // 2. 이미지 생성 (resolvedType 기준)
+        if (resolvedType === 'IMAGE_GENERATION') {
             try {
-               // Check for cancellation before image gen
-               if (copilotCancelRef.current) {
-                   setIsLoading(false);
-                   return;
-               }
+               if (copilotCancelRef.current) { setIsLoading(false); return; }
 
-               // Determine reference image for generation based on tagged node or original project (Base Shape)
-               // DO NOT use attachedImageBase64 here, as that is the "Style Reference" absorbed by enriched_prompt.
                const referencedNode = nodes.find(n => n.id === taggedNodeId);
                const referenceImageUrl = referencedNode?.data?.imageUrl || project.images?.[0];
 
-               const finalPrompt = analysis.enriched_prompt 
-                 ? analysis.enriched_prompt + " (Maintain original product shape structure, high quality realistic product photography)" 
+               const finalPrompt = analysis.enriched_prompt
+                 ? analysis.enriched_prompt + " (Maintain original product shape structure, high quality realistic product photography)"
                  : userMsg + " (Product design concept, high quality, realistic lighting)";
 
                generatedImageUrl = await aiService.generateUpcyclingImage(finalPrompt, config.models.productImage, referenceImageUrl, false, project, userNickname);
             } catch (e) {
                console.error("Image generation failed", e);
-               // If it was cancelled during generation, we handle it in catch or just return
-               if (copilotCancelRef.current) {
-                   setIsLoading(false);
-                   return;
-               }
+               if (copilotCancelRef.current) { setIsLoading(false); return; }
                replyMessage += " (이미지 생성에 실패했습니다.)";
             }
         }
 
-        if (copilotCancelRef.current) {
-            setIsLoading(false);
-            return;
+        if (copilotCancelRef.current) { setIsLoading(false); return; }
+
+        // 3. 노드 생성 및 연결
+        const newNodeId = `node-${Date.now()}`;
+
+        // --- 카테고리별 루트 노드 ID (initialNodes 기준) ---
+        // id '2' = 아이디어 (디자인 형태 변경)
+        // id '3' = 재료 (재질 변경)
+        // id '4' = 제어 (화면 제어)
+        const DESIGN_ROOT = '2';
+        const MATERIAL_ROOT = '3';
+        const VIEW_ROOT = '4';
+
+        // resolvedType에 맞는 카테고리 결정
+        let categoryRootId: string;
+        if (resolvedType === 'VIEW_CONTROL') {
+            categoryRootId = VIEW_ROOT;
+        } else if (resolvedType === 'MATERIAL_CHANGE') {
+            categoryRootId = MATERIAL_ROOT;
+        } else {
+            // DESIGN_CHANGE, IMAGE_GENERATION, UPDATE_RECIPE, GENERATE → 디자인 카테고리
+            categoryRootId = DESIGN_ROOT;
         }
 
-        // 3. Generate New Node based on parsed info
-        const newNodeId = `node-${Date.now()}`;
-        
-        // Determine the parent node to position relative to and link from
-        // If the AI says targetNodeId is very specifically null (off-topic branch), we respect it.
-        // Otherwise we fallback to the tagged node, or AI suggested node, or the last node.
-        const parentNodeId = analysis.targetNodeId === null 
-            ? null 
-            : (taggedNodeId || analysis.targetNodeId || nodes[nodes.length - 1].id);
-            
-        const parentNode = parentNodeId ? nodes.find(n => n.id === parentNodeId) : null;
-        
+        // 같은 카테고리의 사용자 생성 노드 중 가장 최근 것 찾기
+        const DESIGN_NODE_TYPES = ['DESIGN_CHANGE', 'IMAGE_GENERATION', 'GENERATE', 'UPDATE_RECIPE'];
+        const MATERIAL_NODE_TYPES = ['MATERIAL_CHANGE'];
+        const VIEW_NODE_TYPES = ['VIEW_CONTROL'];
+
+        let categoryNodeTypes: string[];
+        if (categoryRootId === DESIGN_ROOT) categoryNodeTypes = DESIGN_NODE_TYPES;
+        else if (categoryRootId === MATERIAL_ROOT) categoryNodeTypes = MATERIAL_NODE_TYPES;
+        else categoryNodeTypes = VIEW_NODE_TYPES;
+
+        let parentNodeId: string | null = null;
+
+        if (taggedNodeId) {
+            // 사용자가 수동으로 노드를 태그한 경우 최우선
+            parentNodeId = taggedNodeId;
+        } else if (resolvedType === 'GENERAL_CHAT') {
+            // 일반 대화 → 연결 안 함
+            parentNodeId = null;
+        } else {
+            // 같은 카테고리의 사용자 생성 노드 중 가장 최근 것
+            const sameTypeUserNodes = nodes.filter(n =>
+                !['1', '2', '3', '4'].includes(n.id) &&
+                categoryNodeTypes.includes(n.data.label as string)
+            );
+
+            if (sameTypeUserNodes.length > 0) {
+                // 이전에 같은 카테고리 노드가 있으면 체인으로 연결
+                parentNodeId = sameTypeUserNodes[sameTypeUserNodes.length - 1].id;
+            } else {
+                // 처음이면 카테고리 루트에 연결
+                parentNodeId = categoryRootId;
+            }
+        }
+
+        const parentNode = parentNodeId ? nodes.find(n => n.id === parentNodeId) ?? null : null;
+
+        // 노드 색상
         let nodeColor = '#A78BFA'; // Default Purple
-        if (analysis.type === 'MATERIAL_CHANGE') nodeColor = '#4ADE80';
-        else if (analysis.type === 'DESIGN_CHANGE') nodeColor = '#FFB84D';
-        else if (analysis.type === 'IMAGE_GENERATION') nodeColor = '#F472B6'; // Pink for images
+        if (resolvedType === 'MATERIAL_CHANGE') nodeColor = '#4ADE80';
+        else if (resolvedType === 'DESIGN_CHANGE') nodeColor = '#FFB84D';
+        else if (resolvedType === 'IMAGE_GENERATION') nodeColor = '#F472B6';
 
         const newNode: Node = {
            id: newNodeId,
            type: 'custom',
-           position: parentNode ? { x: parentNode.position.x + 350, y: parentNode.position.y + (Math.random() * 100 - 50) } : { x: 50, y: nodes.length * 150 + 50 },
+           position: parentNode
+             ? { x: parentNode.position.x + 350, y: parentNode.position.y + (Math.random() * 100 - 50) }
+             : { x: 50, y: nodes.length * 150 + 50 },
            data: {
-               label: analysis.type,
+               label: resolvedType,
                title: '사용자 요청',
                content: userMsg,
                color: nodeColor,
@@ -639,12 +710,12 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
 
         setNodes(prev => [...prev, newNode]);
         if (parentNode) {
-            const newEdge: Edge = { 
-               id: `e${parentNode.id}-${newNodeId}`, 
-               source: parentNode.id, 
-               target: newNodeId, 
-               animated: true, 
-               style: { stroke: nodeColor } 
+            const newEdge: Edge = {
+               id: `e${parentNode.id}-${newNodeId}`,
+               source: parentNode.id,
+               target: newNodeId,
+               animated: true,
+               style: { stroke: nodeColor }
             };
             setEdges(prev => [...prev, newEdge]);
         }
@@ -661,7 +732,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ project, onExit, language, userTo
         setTaggedNodeName(null);
 
         // 4. View Control
-        if (analysis.type === 'VIEW_CONTROL') {
+        if (resolvedType === 'VIEW_CONTROL') {
           if (analysis.action?.includes('rotate')) viewerRef.current?.rotateModel(0, Math.PI / 4);
           if (analysis.action === 'wireframe_on') viewerRef.current?.setWireframe(true);
           if (analysis.action === 'wireframe_off') viewerRef.current?.setWireframe(false);
